@@ -9,7 +9,7 @@
     "mock-okta:debug": "DEBUG=mock-okta npm run mock-okta",
     "wrap": "node tools/wrap-dependencies",
     "prestart": "node tools/copy-static",
-    "start": "python app.py",
+    "start": "./fake-heroku.sh",
     "test:e2e": "webdriver-manager update && protractor test/e2e/conf.js",
     "test:mock-okta": "node test/app-server/lib/test-mock-okta",
     "test:app-server": "mocha test/app-server/index --bail  --timeout 5000",
