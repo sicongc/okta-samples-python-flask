@@ -26,7 +26,7 @@ module.exports = (cmd, args, msg, color) => {
   const bold = normal.bold.underline;
   console.log(normal(`Running "${name}" and waiting for "${msg}"`));
   return new Promise((resolve, reject) => {
-    const child = childProcess.spawn(cmd, args, { encoding: 'utf8' });
+    const child = childProcess.spawn(cmd, args, { encoding: 'utf8', detached: true });
 
     child.stdout.on('data', (buffer) => {
       const data = buffer.toString('utf8');

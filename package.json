@@ -12,8 +12,8 @@
     "start": "./fake-heroku.sh",
     "test:e2e": "webdriver-manager update && protractor test/e2e/conf.js",
     "test:mock-okta": "node test/app-server/lib/test-mock-okta",
-    "test:app-server": "mocha test/app-server/index --bail  --timeout 5000",
-    "test:app-server-all": "mocha test/app-server/with-app-server-start  --timeout 5000"
+    "test:app-server": "mocha test/app-server/index --bail  --timeout 15000",
+    "test:app-server-all": "mocha test/app-server/with-app-server-start  --timeout 15000"
   },
   "author": "",
   "license": "Apache-2.0",

@@ -33,9 +33,10 @@ const config = {
     }));
   },
   afterLaunch() {
-    return promises.then((childProcesses) => {
-      childProcesses.forEach(child => child.kill());
+    promises.then((childProcesses) => {
+      childProcesses.forEach(child => process.kill(-child.pid));
     });
+    return new Promise(resolve => setTimeout(() => resolve(), 1000));
   },
   specs: ['specs/*.js'],
   restartBrowserBetweenTests: false,

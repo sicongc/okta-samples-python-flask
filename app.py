@@ -256,10 +256,6 @@ def bundlejs():
 
 
 if __name__ == "__main__":
-    # Fixme: This lets the generator know that we're running
-    print "bundle is now VALID"
-    sys.stdout.flush()
-
     app.debug = True
     app.run(port=3000)
 

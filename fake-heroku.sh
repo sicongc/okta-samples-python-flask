@@ -9,14 +9,6 @@ if [ ! -d "venv" ]; then
     fi
 fi
 
-# Kill any sessions that are still active
-PROCESSES=`ps ax | grep '[p]ython app.py' | cut -d ' ' -f 1`
-if [ ! -z "${PROCESSES}" ]; then
-    echo "Killing: ${PROCESSES}";
-    kill $PROCESSES;
-fi
-
-
 source venv/bin/activate
 pip install -r requirements.txt
 (python app.py 2>&1)

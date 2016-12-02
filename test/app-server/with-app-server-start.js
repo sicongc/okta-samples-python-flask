@@ -22,8 +22,9 @@ const promises = Promise.all([
 
 before(() => promises);
 
-after(() => (
+after(() => {
   promises.then((childProcesses) => {
-    childProcesses.forEach(child => child.kill());
-  })
-));
+    childProcesses.forEach(child => process.kill(-child.pid));
+  });
+  return new Promise(resolve => setTimeout(() => resolve(), 1000));
+});
