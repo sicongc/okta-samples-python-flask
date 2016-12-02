@@ -21,7 +21,7 @@
     "test:app-server-all": "mocha test/app-server/with-app-server-start --timeout 15000",
     "test": "npm run test:app-server-all && npm run test:e2e",
     "prestart": "node tools/copy-static",
-    "start": "echo \"\n--- REPLACE THIS! ---\n\" && exit 1;"
+    "start": "./fake-heroku.sh"
   },
   "devDependencies": {
     "chalk": "1.1.3",

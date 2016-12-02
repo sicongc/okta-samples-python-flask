@@ -64,7 +64,9 @@ function mockOktaTokenRequest(options) {
   // - Modify mock-okta to use our own signing key
   // - Re-record the mock-okta tapes with the .well-known request
   // - Add the test here
-  const idToken = `header.${encoded}.signature`;
+  const mockHeader = 'eyJhbGciOiJSUzI1NiIsImtpZCI6Ii1DZGlIUXE0REFZbXREMzdzdTJWeW1TemwyZnlBcko4dVNDcEdQXzZSeGMifQ';
+  const mockSignature = 'GuJ3F3LwlW4jx0dlSkAZXkgEn5owNC5WiD1l9c6DnU1nkrQ1JYJP7OtMoDguaJgDCvDCMZ_FelRSsarKI_iGFgS9KRg6x4zPYRXpu_E6Yvb2WHNFqsKspgYhGy9lJZrTg1MZLikSf8Dvf6oPxrY1cqw3CJsuKYlhFhFbQnXV3LuaPk_tgXPmX3c3_P4Ma0If09HJjVB3kDIaNAeUWrvlCGGnHx4Z6QuY9BwfscMqT7q3SoYO1yQ0MoEuehhGXoWeyyuDs51wVIjyLO6cuNjWlkGGPgqC_B5aqLvYkOgqh2DGEFpN9ML2JkRmtgJNeMpPnwbbSzMSEPbhs7W8_RAMXw';
+  const idToken = `${mockHeader}.${encoded}.${mockSignature}`;
 
   const res = {
     access_token: 'SOME_TOKEN',

@@ -7,7 +7,7 @@
   },
   "server": {
     "staticDir": "dist",
-    "startSignal": "bundle is now VALID",
+    "startSignal": "Debugger pin code",
     "port": 3000
   },
   "mockOkta": {

@@ -22,3 +22,12 @@ if ! npm install; then
   echo "npm install failed! Exiting..."
   exit ${FAILED_SETUP}
 fi
+
+# Python Flask specific dependencies
+
+apt-get --assume-yes install python-dev
+pip install virtualenv
+
+virtualenv venv
+source venv/bin/activate
+pip install -r requirements.txt
