@@ -28,11 +28,11 @@ from cryptography.hazmat.primitives import serialization
 
 import requests
 from requests.auth import HTTPBasicAuth
-
+cwd = os.path.dirname(os.path.realpath(__file__))
 app = Flask(__name__,
             static_folder='dist',
             static_url_path='',
-            template_folder='/Users/joelfranusic/Projects/samples-python-flask/tools/templates')
+            template_folder='{}/tools/templates'.format(cwd))
 app.secret_key = 'this is secret!'
 
 
