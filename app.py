@@ -4,13 +4,14 @@ import os
 from datetime import datetime
 from datetime import timedelta
 import calendar
+import json
 
 from flask import Flask
 from flask import request
 from flask import session
 from flask import redirect
 from flask import url_for
-from flask import abort
+from flask import make_response
 from flask_stache import render_view
 from flask_stache import render_template
 
@@ -147,8 +148,11 @@ def auth_profile():
     u = session['user']
     # FIXME: Why did I need this hack?
     u['claims']['iss'] = 'http:&#x2F;&#x2F;127.0.0.1:7777'
-
-    return render_template('index', user=u, oidc=oidc, site=site)
+    resp = make_response(render_template('index', user=u, oidc=oidc, site=site))
+    resp.set_cookie('okta-oauth-nonce', '', expires=0)
+    resp.set_cookie('okta-oauth-state', '', expires=0)
+    resp.set_cookie('okta-oauth-redirect-params', '', expires=0)
+    return resp
 
 @app.route("/authorization-code/callback")
 def auth_callback():
@@ -165,11 +169,14 @@ def auth_callback():
         nonce = redirectParams['nonce']
         state = redirectParams['state']
     else:
-        abort(401)
-    if (not state or request.args.get('state') != state):
-        abort(401)
+        return "invalid nonce or state", 401
+    if (request.args.get('state') != state):
+        err = "'{}' != '{}'".format(
+            request.args.get('state'),
+            state)
+        return "invalid state: {}".format(err), 401
     if 'code' not in request.args:
-        abort(401)
+        return "no code in request arguments", 401
 
     auth = HTTPBasicAuth(oidc['clientId'], oidc['clientSecret'])
     querystring = {
@@ -183,7 +190,6 @@ def auth_callback():
         )
     headers = {
         'User-Agent': None,
-        #FIXME: Remove this, uncomment "params" below:
         'Authorization': 'Basic: NVZObTF4WjZ0bnI4YURlR3JIV2Y6bm9SR08wZGJXR044cWFWb05sLTBQakVRQXRyc0IxOHU0cGJtOTZ5Mg==',
         'Connection': 'close',
         'Accept': None,
@@ -192,12 +198,12 @@ def auth_callback():
     url = "{}/oauth2/v1/token?{}".format(oidc['oktaUrl'], qs)
     r = requests.post(url,
                       stream=False,
+                      # auth=auth,
+                      # params=querystring,
                       headers=headers)
-                      # auth=auth)
-                      # params=querystring)
     return_value = r.json()
     if 'id_token' not in return_value:
-        abort(401)
+        return "no id_token in response from /token endpoint", 401
     id_token = return_value['id_token']
 
     # START FIXME
@@ -228,15 +234,14 @@ def auth_callback():
             options={'leeway': leeway},
             audience=oidc['clientId'])
     except JWTClaimsError as e:
-        abort(401)
+        return str(e), 401
     except ExpiredSignatureError as e:
-        print "ExpiredSignatureError: {}".format(str(e))
-        abort(401)
+        return str(e), 401
     if nonce != claims['nonce']:
-        abort(401)
+        return "invalid nonce", 401
     acceptable_iat = calendar.timegm((datetime.utcnow() + timedelta(seconds=leeway)).timetuple())
     if 'iat' in claims and claims['iat'] > acceptable_iat:
-        abort(401)
+        return "invalid iat claim", 401
 
     session['user'] = {
         'email': claims['email'],
