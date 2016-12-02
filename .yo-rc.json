@@ -1,0 +1,9 @@
+{
+  "@okta/generator-samples": {
+    "type": "end-to-end",
+    "environment": "Python",
+    "framework": "Flask",
+    "name": "samples-python-flask",
+    "version": "1.3.0"
+  }
+}
