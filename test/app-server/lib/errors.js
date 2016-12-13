@@ -55,6 +55,17 @@ exports.CODE_QUERY_CODE_MISSING = `
       Validate that the "code" query parameter is present.
 `;
 
+exports.CODE_TOKEN_INVALID_URL = `
+      The /authorization-code/callback endpoint should make a request to the
+      Okta token endpoint. The url should look EXACTLY like this - Note, the
+      order of query params is important.
+
+      ${config.mockOkta.proxy}:${config.mockOkta.port}/oauth2/v1/token
+        ?grant_type=authorization_code
+        &code=SOME_CODE
+        &redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fauthorization-code%2Fcallback
+`;
+
 exports.CODE_TOKEN_INVALID_METHOD = `
       The /authorization-code/callback endpoint should make a request to the
       Okta token endpoint. The /token request should be a POST. To fix this,
@@ -67,17 +78,6 @@ exports.CODE_TOKEN_INVALID_CONTENT_TYPE = `
       this, set this header:
 
       content-type: application/x-www-form-urlencoded
-`;
-
-exports.CODE_TOKEN_INVALID_URL = `
-      The /authorization-code/callback endpoint should make a request to the
-      Okta token endpoint. The url should look EXACTLY like this - Note, the
-      order of query params is important.
-
-      ${config.mockOkta.proxy}:${config.mockOkta.port}/oauth2/v1/token
-        ?grant_type=authorization_code
-        &code=SOME_CODE
-        &redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fauthorization-code%2Fcallback
 `;
 
 exports.CODE_TOKEN_INVALID_AUTHORIZATION = `
@@ -93,7 +93,7 @@ exports.CODE_TOKEN_INVALID_AUTHORIZATION = `
 
       2. Set the header:
 
-         authorization: Basic: {{secret}}
+         authorization: Basic {{secret}}
 `;
 
 exports.CODE_TOKEN_REDIRECT = `
@@ -113,8 +113,58 @@ exports.CODE_TOKEN_NO_ID_TOKEN = `
       there is no id_token in the response.
 `;
 
+exports.CODE_TOKEN_BAD_ID_TOKEN = `
+      The /authorization-code/callback endpoint should return status code 401 if
+      the id_token is malformed.
+`;
+
+exports.CODE_KEYS_INVALID_URL = `
+      The /authorization-code/callback endpoint should make a request to
+      /oauth2/v1/keys to get the public key used to validate the id_token
+      signature.
+
+      Read more about validating id_tokens here:
+      http://developer.okta.com/docs/api/resources/oidc.html#validating-id-tokens
+`;
+
+exports.CODE_TOKEN_INVALID_SIG = `
+      The /authorization-code/callback endpoint should return status code 401 if
+      the id_token signature is invalid.
+
+      Most languages have libraries that can validate JWTs for you - find the
+      one that is common in your language or framework. If there is no JWT
+      validation library, try searching for a JWS validation library.
+
+      Some helpful resources:
+      JWT.io - https://jwt.io/
+      JWS (JSON Web Signature) - https://tools.ietf.org/html/rfc7515
+      JWT (JSON Web Token) - https://tools.ietf.org/html/rfc7519
+`;
+
+exports.CODE_TOKEN_INVALID_ALG = `
+      The /authorization-code/callback endpoint should return status code 401 if
+      the id_token header is invalid.
+
+      When verifying the id_token signature, use the algorithm for the kid
+      specified in the /oauth2/v1/keys response. Do not trust the id_token
+      header algorithm!
+
+      Quick exploit - Swap an id_token header with alg: none
+`;
+
+exports.CODE_KEYS_CACHE = `
+      The /authorization-code/callback endpoint should cache requests to
+      /oauth2/v1/keys.
+
+      Pseudo Code:
+      1. Make token request
+      2. Extract kid from id_token header
+      3. If kid does not exist in cache, make /oauth2/v1/keys request. Cache
+         this response.
+`;
+
 const DECODE_CLAIMS = `
-      To validate id_token claims:
+      If you're not using a library to decode the JWT, validate claims like this:
 
       1. Split the returned id_token by "."
          > payload = returnedJson.split('.')

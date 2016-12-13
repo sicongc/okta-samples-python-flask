@@ -20,6 +20,8 @@ const chalk = require('chalk');
 const diff = require('diff');
 const debug = require('debug')('mock-okta');
 const querystring = require('querystring');
+const jws = require('jws');
+const keys = require('./keys-test');
 
 const util = module.exports;
 
@@ -259,14 +261,15 @@ function replaceUrls(str, data) {
  * @arg {string} data.iss
  */
 function swapIdToken(idToken, data) {
-  // Split the id_token JWT into its components
-  const parts = idToken.split('.');
-  const header = parts[0];
-  const payload = parts[1];
-  const signature = parts[2];
+  const decoded = jws.decode(idToken);
 
-  // Base64 decode the payload
-  const claims = JSON.parse(new Buffer(payload, 'base64').toString('utf8'));
+  const header = decoded.header;
+  const origHeader = Object.assign({}, header);
+  header.kid = keys.publicJwk.kid;
+
+  logDiff('Swapping id_token.header claims', origHeader, header);
+
+  const claims = JSON.parse(decoded.payload);
   const origClaims = Object.assign({}, claims);
 
   // Replace nonce with the nonce sent by the client
@@ -279,11 +282,13 @@ function swapIdToken(idToken, data) {
   const exp = Math.floor(new Date().getTime() / 1000) + 3600;
   claims.exp = exp;
 
-  logDiff('Swapping out id_token claims', origClaims, claims);
+  logDiff('Swapping id_token.payload claims', origClaims, claims);
 
-  // Pack it back into the id_token JWT, and return it
-  const swapped = new Buffer(JSON.stringify(claims), 'utf8').toString('base64');
-  return `${header}.${swapped}.${signature}`;
+  return jws.sign({
+    header: decoded.header,
+    payload: claims,
+    secret: keys.privatePem,
+  });
 }
 
 /**

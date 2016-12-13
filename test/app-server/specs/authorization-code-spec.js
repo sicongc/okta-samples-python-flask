@@ -10,8 +10,16 @@
  * See the License for the specific language governing permissions and limitations under the License.
  */
 
+'use strict';
+
 const util = require('../lib/util');
 const errors = require('../lib/errors');
+const config = require('../../../.samples.config.json');
+const keys1 = require('../lib/keys1');
+const keys2 = require('../lib/keys2');
+const jws = require('jws');
+const merge = require('lodash.merge');
+const crypto = require('crypto');
 
 const LOGIN_REDIRECT_PATH = '/authorization-code/login-redirect';
 const LOGIN_CUSTOM_PATH = '/authorization-code/login-custom';
@@ -19,81 +27,94 @@ const CALLBACK_PATH = '/authorization-code/callback';
 const PROFILE_PATH = '/authorization-code/profile';
 const LOGOUT_PATH = '/authorization-code/logout';
 
-function setupValidCallbackReq() {
+function validateCallback() {
   return util.request()
     .get(`${CALLBACK_PATH}?state=SOME_STATE&code=SOME_CODE`)
     .set('Cookie', 'okta-oauth-nonce=SOME_NONCE;okta-oauth-state=SOME_STATE')
-    .send();
+    .send()
+    .then(res => util.mockVerify().then(() => res));
 }
 
-function mockOktaTokenRequest(options) {
-  const claims = {
-    sub: '00ukz6E06vtrGDVn90g3',
-    name: 'John Adams',
-    email: 'john@acme.com',
-    ver: 1,
-    iss: 'http://127.0.0.1:7777',
-    aud: '5VNm1xZ6tnr8aDeGrHWf',
-    iat: 1478388232,
-    exp: Math.floor(new Date().getTime() / 1000) + 3600,
-    jti: 'ID.XaR6tP7oHKkw81lQaap0CICytGPvxfSNH0f4zJy2C1g',
-    amr: 'pwd',
-    idp: '00okosaVJPYJkSwVk0g3',
-    nonce: 'SOME_NONCE',
-    preferred_username: 'john@acme.com',
-    auth_time: 1478388232,
-    at_hash: 'n-Hk6KbagtcDdarKOVyAKQ',
-  };
+function randomKid() {
+  return crypto.randomBytes(16).toString('hex');
+}
 
-  if (options.claims) {
-    Object.keys(options.claims).forEach((key) => {
-      if (options.claims[key] === null) {
-        delete claims[key];
-      } else {
-        claims[key] = options.claims[key];
-      }
-    });
+function createIdToken(opts, kid) {
+  const options = opts || {};
+  const jwsOptions = {
+    header: {
+      alg: 'RS256',
+      kid,
+    },
+    payload: {
+      sub: '00ukz6E06vtrGDVn90g3',
+      name: 'John Adams',
+      email: 'john@acme.com',
+      ver: 1,
+      iss: 'http://127.0.0.1:7777',
+      aud: config.oidc.clientId,
+      iat: 1478388232,
+      exp: Math.floor(new Date().getTime() / 1000) + 3600,
+      jti: 'ID.XaR6tP7oHKkw81lQaap0CICytGPvxfSNH0f4zJy2C1g',
+      amr: 'pwd',
+      idp: '00okosaVJPYJkSwVk0g3',
+      nonce: 'SOME_NONCE',
+      preferred_username: 'john@acme.com',
+      auth_time: 1478388232,
+      at_hash: 'n-Hk6KbagtcDdarKOVyAKQ',
+    },
+    secret: keys1.privatePem,
+  };
+  merge(jwsOptions, {
+    header: options.header,
+    payload: options.payload,
+    secret: options.secret,
+  });
+
+  let idToken = jws.sign(jwsOptions);
+  if (options.signature) {
+    idToken = idToken.slice(0, idToken.lastIndexOf('.') + 1) + idToken.signature;
   }
 
-  const encoded = new Buffer(JSON.stringify(claims), 'utf8').toString('base64');
+  return idToken;
+}
 
-  // Construct the id_token.
-  // NOTE: We currently do not support validating the signature. Things that
-  // have to be done before we can do this:
-  // - Make the .well-known request in one of the app servers
-  // - Modify mock-okta to use our own signing key
-  // - Re-record the mock-okta tapes with the .well-known request
-  // - Add the test here
-  const mockHeader = 'eyJhbGciOiJSUzI1NiIsImtpZCI6Ii1DZGlIUXE0REFZbXREMzdzdTJWeW1TemwyZnlBcko4dVNDcEdQXzZSeGMifQ';
-  const mockSignature = 'GuJ3F3LwlW4jx0dlSkAZXkgEn5owNC5WiD1l9c6DnU1nkrQ1JYJP7OtMoDguaJgDCvDCMZ_FelRSsarKI_iGFgS9KRg6x4zPYRXpu_E6Yvb2WHNFqsKspgYhGy9lJZrTg1MZLikSf8Dvf6oPxrY1cqw3CJsuKYlhFhFbQnXV3LuaPk_tgXPmX3c3_P4Ma0If09HJjVB3kDIaNAeUWrvlCGGnHx4Z6QuY9BwfscMqT7q3SoYO1yQ0MoEuehhGXoWeyyuDs51wVIjyLO6cuNjWlkGGPgqC_B5aqLvYkOgqh2DGEFpN9ML2JkRmtgJNeMpPnwbbSzMSEPbhs7W8_RAMXw';
-  const idToken = `${mockHeader}.${encoded}.${mockSignature}`;
+function mockOktaRequests(options) {
+  const reqs = [];
+  const kid = options.kid || `KID_${randomKid()}`;
 
+  // 1. /oauth2/v1/token
+  const req = options.req || {};
+  if (!req.url) {
+    req.url = '/oauth2/v1/token' +
+      '?grant_type=authorization_code' +
+      '&code=SOME_CODE' +
+      '&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fauthorization-code%2Fcallback';
+  }
   const res = {
     access_token: 'SOME_TOKEN',
     token_type: 'Bearer',
     expires_in: 3600,
     scope: 'openid email profile',
-    id_token: idToken,
+    id_token: createIdToken(options.idToken, kid),
   };
+  merge(res, options.res);
+  reqs.push({ req, res });
 
-  if (options.res) {
-    Object.keys(options.res).forEach((key) => {
-      if (options.res[key] === null) {
-        delete res[key];
-      } else {
-        res[key] = options.res[key];
-      }
-    });
+  // 2. /oauth2/v1/keys
+  if (!options.cachedKeyRequest) {
+    const keyReq = { url: '/oauth2/v1/keys' };
+    const keyRes = { keys: [options.publicJwk || keys1.publicJwk] };
+    keyRes.keys[0].kid = kid;
+    reqs.push({ req: keyReq, res: keyRes, optional: options.keysOptional });
   }
 
-  return util.mockOktaRequest()
-    .post('/set')
-    .send({ req: options.req || {}, res });
+  return util.mockOktaRequest(reqs);
 }
 
 function createSession() {
   const agent = util.agent();
-  const req = mockOktaTokenRequest({}).then(() => (
+  const req = mockOktaRequests({}).then(() => (
     agent
       .get(`${CALLBACK_PATH}?state=SOME_STATE&code=SOME_CODE`)
       .set('Cookie', 'okta-oauth-nonce=SOME_NONCE;okta-oauth-state=SOME_STATE')
@@ -133,110 +154,150 @@ describe('Authorization Code', () => {
     });
 
     describe('Getting id_token via /oauth2/v1/token', () => {
+      it('constructs the /token request with the correct query params', () => {
+        const mock = { keysOptional: true };
+        const req = mockOktaRequests(mock).then(validateCallback);
+        return util.shouldNotError(req, errors.CODE_TOKEN_INVALID_URL);
+      });
       it('is a POST', () => {
-        const mock = { req: { method: 'POST' } };
-        const req = mockOktaTokenRequest(mock).then(setupValidCallbackReq);
+        const mock = util.expand('req.method', 'POST');
+        mock.keysOptional = true;
+        const req = mockOktaRequests(mock).then(validateCallback);
         return util.shouldNotError(req, errors.CODE_TOKEN_INVALID_METHOD);
       });
       it('sets the "content-type" header to "application/x-www-form-urlencoded"', () => {
-        const mock = {
-          req: {
-            headers: {
-              'content-type': 'application/x-www-form-urlencoded',
-            },
-          },
-        };
-        const req = mockOktaTokenRequest(mock).then(setupValidCallbackReq);
+        const mock = util.expand('req.headers.content-type', 'application/x-www-form-urlencoded');
+        mock.keysOptional = true;
+        const req = mockOktaRequests(mock).then(validateCallback);
         return util.shouldNotError(req, errors.CODE_TOKEN_INVALID_CONTENT_TYPE);
-      });
-      it('constructs the /token request with the correct query params', () => {
-        const url = '/oauth2/v1/token' +
-          '?grant_type=authorization_code' +
-          '&code=SOME_CODE' +
-          '&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fauthorization-code%2Fcallback';
-        const mock = { req: { url } };
-        const req = mockOktaTokenRequest(mock).then(setupValidCallbackReq);
-        return util.shouldNotError(req, errors.CODE_TOKEN_INVALID_URL);
       });
 
       // Note: This currently assumes that our app servers will use
       // 'client_secret_basic' as the auth method. Update this when we add
       // mock-okta support for 'client_secret_post'.
       it('uses basic auth for the authorization header', () => {
-        const secret = 'NVZObTF4WjZ0bnI4YURlR3JIV2Y6bm9SR08wZGJXR044cWFWb05sLTBQakVRQXRyc0IxOHU0cGJtOTZ5Mg==';
-        const mock = {
-          req: {
-            headers: {
-              authorization: `Basic: ${secret}`,
-            },
-          },
-        };
-        const req = mockOktaTokenRequest(mock).then(setupValidCallbackReq);
+        const secret = new Buffer(`${config.oidc.clientId}:${config.oidc.clientSecret}`, 'utf8').toString('base64');
+        const mock = util.expand('req.headers.authorization', `Basic ${secret}`);
+        mock.keysOptional = true;
+        const req = mockOktaRequests(mock).then(validateCallback);
         return util.shouldNotError(req, errors.CODE_TOKEN_INVALID_AUTHORIZATION);
       });
     });
 
     describe('Redirecting to profile on successful token response', () => {
       it('redirects to /authorization-code/profile', () => {
-        const req = mockOktaTokenRequest({}).then(setupValidCallbackReq);
+        const req = mockOktaRequests({ keysOptional: true }).then(validateCallback);
         const redirectUri = 'http://localhost:3000/authorization-code/profile';
         return util.shouldRedirect(req, redirectUri, errors.CODE_TOKEN_REDIRECT);
       });
     });
 
     describe('Validating /oauth2/v1/token response', () => {
-      it('returns 401 if there is an error in the response', () => {
-        const mock = { req: { thisExpectedHeader: 'does_not_exist' } };
-        const req = mockOktaTokenRequest(mock).then(setupValidCallbackReq);
-        return util.should401(req, errors.CODE_TOKEN_ERROR);
+      describe('General', () => {
+        it('returns 401 if there is an error in the response', () => {
+          const mock = { req: { thisExpectedHeader: 'does_not_exist' }, keysOptional: true };
+          const req = mockOktaRequests(mock).then(validateCallback);
+          return util.should401(req, errors.CODE_TOKEN_ERROR);
+        });
+        it('returns 401 if the response does not contain an id_token', () => {
+          const mock = { res: { id_token: null }, keysOptional: true };
+          const req = mockOktaRequests(mock).then(validateCallback);
+          return util.should401(req, errors.CODE_TOKEN_NO_ID_TOKEN);
+        });
+        it('returns 401 if the idToken is malformed', () => {
+          const mock = { res: { id_token: 'nodots' }, keysOptional: true };
+          const req = mockOktaRequests(mock).then(validateCallback);
+          return util.should401(req, errors.CODE_TOKEN_BAD_ID_TOKEN);
+        });
       });
-      it('returns 401 if the response does not contain an id_token', () => {
-        const mock = { res: { id_token: null } };
-        const req = mockOktaTokenRequest(mock).then(setupValidCallbackReq);
-        return util.should401(req, errors.CODE_TOKEN_NO_ID_TOKEN);
+      describe('Signature', () => {
+        it('makes a request to /oauth2/v1/keys to fetch the public keys', () => {
+          const req = mockOktaRequests({}).then(validateCallback);
+          return util.shouldNotError(req, errors.CODE_KEYS_INVALID_URL);
+        });
+        it('returns 401 if the JWT signature is invalid', () => {
+          const mock = util.expand('idToken.signature', 'invalidSignature');
+          const req = mockOktaRequests(mock).then(validateCallback);
+          return util.should401(req, errors.CODE_TOKEN_INVALID_SIG);
+        });
+        it('returns 401 if id_token is signed with an invalid cert', () => {
+          const mock = util.expand('idToken.secret', keys2.privatePem);
+          const req = mockOktaRequests(mock).then(validateCallback);
+          return util.should401(req, errors.CODE_TOKEN_INVALID_SIG);
+        });
+        it('returns 401 if the token header algorithm does not match the published key algorithm', () => {
+          const mock = util.expand('idToken.header.alg', 'none');
+          const req = mockOktaRequests(mock).then(validateCallback);
+          return util.should401(req, errors.CODE_TOKEN_INVALID_ALG);
+        });
+        it('caches responses to /oauth2/v1/keys', () => {
+          const kid1 = randomKid();
+          const kid2 = randomKid();
+          const withFirstKid1 = () => (
+            mockOktaRequests({ kid: kid1 }).then(validateCallback)
+          );
+          const withSecondKid1 = () => (
+            mockOktaRequests({ kid: kid1, cachedKeyRequest: true }).then(validateCallback)
+          );
+          const withKid2 = () => {
+            const mock = {
+              kid: kid2,
+              idToken: {
+                secret: keys2.privatePem,
+              },
+              publicJwk: keys2.publicJwk,
+            };
+            return mockOktaRequests(mock).then(validateCallback);
+          };
+          const reqs = withFirstKid1().then(withSecondKid1).then(withKid2);
+          return util.shouldNotError(reqs, errors.CODE_KEYS_CACHE);
+        });
       });
-      it('returns 401 if id_token.nonce does not match the cookie nonce', () => {
-        const mock = { claims: { nonce: 'BAD_NONCE' } };
-        const req = mockOktaTokenRequest(mock).then(setupValidCallbackReq);
-        return util.should401(req, errors.CODE_TOKEN_BAD_NONCE);
-      });
-      it('returns 401 if id_token.iss does not match our issuer', () => {
-        const mock = { claims: { iss: 'BAD_ISSUER' } };
-        const req = mockOktaTokenRequest(mock).then(setupValidCallbackReq);
-        return util.should401(req, errors.CODE_TOKEN_BAD_ISSUER);
-      });
-      it('returns 401 if id_token.aud does not match our clientId', () => {
-        const mock = { claims: { aud: 'NOT_CONFIGURED_CLIENT_ID' } };
-        const req = mockOktaTokenRequest(mock).then(setupValidCallbackReq);
-        return util.should401(req, errors.CODE_TOKEN_BAD_AUD);
-      });
-      it('returns 401 if the id_token has expired', () => {
-        // Set expiration to 20 minutes ago
-        const exp = Math.floor(new Date().getTime() / 1000) - 1200;
-        const mock = { claims: { exp } };
-        const req = mockOktaTokenRequest(mock).then(setupValidCallbackReq);
-        return util.should401(req, errors.CODE_TOKEN_EXPIRED);
-      });
-      it('accounts for clock skew in expiration check', () => {
-        // Set expiration to 4 minutes ago
-        const exp = Math.floor(new Date().getTime() / 1000) - 240;
-        const mock = { claims: { exp } };
-        const req = mockOktaTokenRequest(mock).then(setupValidCallbackReq);
-        return util.shouldNotError(req, errors.CODE_TOKEN_EXP_CLOCK_SKEW);
-      });
-      it('returns 401 if the id_token was issued in the future', () => {
-        // Set issued at time to 20 minutes from now
-        const iat = Math.floor(new Date().getTime() / 1000) + 1200;
-        const mock = { claims: { iat } };
-        const req = mockOktaTokenRequest(mock).then(setupValidCallbackReq);
-        return util.should401(req, errors.CODE_TOKEN_IAT_FUTURE);
-      });
-      it('accounts for clock skew in issued at check', () => {
-        // Set issued at time to 4 minutes from now
-        const iat = Math.floor(new Date().getTime() / 1000) + 240;
-        const mock = { claims: { iat } };
-        const req = mockOktaTokenRequest(mock).then(setupValidCallbackReq);
-        return util.shouldNotError(req, errors.CODE_TOKEN_IAT_CLOCK_SKEW);
+
+      describe('Claims', () => {
+        it('returns 401 if id_token.nonce does not match the cookie nonce', () => {
+          const mock = util.expand('idToken.payload.nonce', 'BAD_NONCE');
+          const req = mockOktaRequests(mock).then(validateCallback);
+          return util.should401(req, errors.CODE_TOKEN_BAD_NONCE);
+        });
+        it('returns 401 if id_token.iss does not match our issuer', () => {
+          const mock = util.expand('idToken.payload.iss', 'BAD_ISSUER');
+          const req = mockOktaRequests(mock).then(validateCallback);
+          return util.should401(req, errors.CODE_TOKEN_BAD_ISSUER);
+        });
+        it('returns 401 if id_token.aud does not match our clientId', () => {
+          const mock = util.expand('idToken.payload.aud', 'NOT_CONFIGURED_CLIENT_ID');
+          const req = mockOktaRequests(mock).then(validateCallback);
+          return util.should401(req, errors.CODE_TOKEN_BAD_AUD);
+        });
+        it('returns 401 if the id_token has expired', () => {
+          // Set expiration to 20 minutes ago
+          const exp = Math.floor(new Date().getTime() / 1000) - 1200;
+          const mock = util.expand('idToken.payload.exp', exp);
+          const req = mockOktaRequests(mock).then(validateCallback);
+          return util.should401(req, errors.CODE_TOKEN_EXPIRED);
+        });
+        it('accounts for clock skew in expiration check', () => {
+          // Set expiration to 4 minutes ago
+          const exp = Math.floor(new Date().getTime() / 1000) - 240;
+          const mock = util.expand('idToken.payload.exp', exp);
+          const req = mockOktaRequests(mock).then(validateCallback);
+          return util.shouldNotError(req, errors.CODE_TOKEN_EXP_CLOCK_SKEW);
+        });
+        it('returns 401 if the id_token was issued in the future', () => {
+          // Set issued at time to 20 minutes from now
+          const iat = Math.floor(new Date().getTime() / 1000) + 1200;
+          const mock = util.expand('idToken.payload.iat', iat);
+          const req = mockOktaRequests(mock).then(validateCallback);
+          return util.should401(req, errors.CODE_TOKEN_IAT_FUTURE);
+        });
+        it('accounts for clock skew in issued at check', () => {
+          // Set issued at time to 4 minutes from now
+          const iat = Math.floor(new Date().getTime() / 1000) + 240;
+          const mock = util.expand('idToken.payload.iat', iat);
+          const req = mockOktaRequests(mock).then(validateCallback);
+          return util.shouldNotError(req, errors.CODE_TOKEN_IAT_CLOCK_SKEW);
+        });
       });
     });
   });

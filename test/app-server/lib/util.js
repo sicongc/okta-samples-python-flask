@@ -10,6 +10,8 @@
  * See the License for the specific language governing permissions and limitations under the License.
  */
 
+'use strict';
+
 const chai = require('chai');
 const chaiHttp = require('chai-http');
 const config = require('../../../.samples.config.json');
@@ -39,10 +41,33 @@ util.agent = () => chai.request.agent(baseAppUrl);
 util.get = path => util.request().get(path).send();
 
 /**
- * Sends a /set request to the test mock-server to set expectations for the
+ * Sends a /mock/set request to the test mock-server to set expectations for the
  * next request.
  */
-util.mockOktaRequest = () => chai.request(baseMockOktaUrl);
+util.mockOktaRequest = reqs => (
+  chai.request(baseMockOktaUrl).post('/mock/set').send(reqs)
+);
+
+util.mockVerify = () => (
+  chai.request(baseMockOktaUrl).post('/mock/done').send()
+);
+
+/**
+ * Helper function to construct nested objects.
+ *
+ * Example:
+ * util.expand('a.b.c', 3) -> { a: { b: c: 3 } }
+ */
+util.expand = (key, val) => {
+  const parts = key.split('.');
+  const obj = {};
+  let cursor = obj;
+  parts.forEach((part, i) => {
+    cursor[part] = i === parts.length - 1 ? val : {};
+    cursor = cursor[part];
+  });
+  return obj;
+};
 
 /**
  * Verifies that the response sets a 401 status code

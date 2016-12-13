@@ -17,12 +17,14 @@
 const connect = require('connect');
 const http = require('http');
 const yakbak = require('yakbak');
+const url = require('url');
 const chalk = require('chalk');
 const zlib = require('zlib');
 const path = require('path');
 const parseArgs = require('minimist');
 const debug = require('debug')('mock-okta');
 const util = require('./util');
+const keys = require('./keys-test');
 const config = require('../../.samples.config.json').mockOkta;
 
 // ----------------------------------------------------------------------------
@@ -116,6 +118,14 @@ function sendHeaders(res, headers, data, setHeader) {
 // Middleware
 
 /**
+ * For the /oauth2/v1/keys request, skip the proxy and return our mock JWKS.
+ */
+function handleKeys(req, res) {
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({ keys: [keys.publicJwk] }));
+}
+
+/**
  * Transforms the incoming request to match a pre-recorded response that is
  * stored in the tapes/ dir, and rewrites the response to work with the
  * current request.
@@ -125,6 +135,19 @@ function transform(req, res, next) {
 
   const query = util.parseQuery(req.url);
   const data = util.mapRequestToCache(req);
+
+  // Request properties that are hashed by the incoming-message-hash module
+  const reqParts = url.parse(req.url, true);
+  const hashedReqParams = {
+    httpVersion: req.httpVersion,
+    method: req.method,
+    pathname: reqParts.pathname,
+    query: reqParts.query,
+    headers: req.headers,
+    trailers: req.trailers,
+  };
+  debug(chalk.bold('Looking up mapped request in cached tapes'));
+  debug(JSON.stringify(hashedReqParams, null, 2));
 
   // It is important to use a proxy host that is different from the local
   // server - for example, using localhost:3000 for the server and
@@ -136,7 +159,7 @@ function transform(req, res, next) {
   // Store query params from the /authorize request to retrieve later when
   // the user makes a request to the /token endpoint
   if (data.isAuthorizeReq) {
-    debug('/authorize reqest, storing data');
+    debug('/authorize request, storing data');
     debug(data);
     store[data.state] = { state: data.state, nonce: data.nonce };
   }
@@ -232,6 +255,7 @@ function transform(req, res, next) {
 const app = connect();
 const tapeDir = path.resolve(__dirname, 'tapes');
 
+app.use('/oauth2/v1/keys', handleKeys);
 app.use(transform);
 app.use(yakbak(config.proxied, { dirname: tapeDir, noRecord: !record }));
 
