@@ -3,7 +3,7 @@ from datetime import timedelta
 import calendar
 import json
 import os
-import sys
+import re
 import urllib
 
 from flask import Flask
@@ -13,11 +13,10 @@ from flask import request
 from flask import session
 from flask import url_for
 from flask_stache import render_template
-from flask_stache import render_view
+from jose import jws
 from jose import jwt
-from jose.exceptions import ExpiredSignatureError
-from jose.exceptions import JWTClaimsError
 from requests.auth import HTTPBasicAuth
+import jose
 import requests
 
 cwd = os.path.dirname(os.path.realpath(__file__))
@@ -25,81 +24,14 @@ app = Flask(__name__,
             static_folder='dist',
             static_url_path='',
             template_folder='{}/tools/templates'.format(cwd))
+# FIXME: Indicate that this is meant to be determined by the end user.
 app.secret_key = 'this is secret!'
-
-
-# START FIXME
-# Remove this test fixtures, which are taken from:
-# https://github.com/jpf/okta-oidc-beta/blob/master/README.org#validating-an-oidc-id_token-from-okta
-import struct
-import base64
-import jwt as pyjwt
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization
-
-FIXME_private_key = '''
------BEGIN RSA PRIVATE KEY-----
-MIICXQIBAAKBgQDYrIBJjY822hL90KbvGz/FfbrUbDfCcScc1IzUn95O1I+AXwBX
-yaSh0HJhXEztBvKkfD9+Kq7Blx8EmRfGo6ziT+fZ0mE0WhZv87nFwvedApsCwTEt
-/r3VNNsRmwGGSXxTlbYj1OB3QdGeyl9Gk127akSRBBet7Y2XCezOu809cQIDAQAB
-AoGBALU3MORTfOAHa7LUe4mnZKKsEUHwcIIzWN8H9fEu9CNCK/LVgdfqUcL0L3W2
-WLA1C2L+d6vxzs8isVKLKBN+eOwUnhbMbMtD8h1SbTUV/JFrZsHycNcff4ythjLW
-dMo91+t7EcMKDVmej384Saj8D0z2i1QItvBK/msmSQqdYMXxAkEA72IanU3e5EI1
-rkII0/eVLliK6IM+uhaCgAz7Pt7bxntO2NZ8rscn93v6X7SS2Q/QQKyfsT+AbCXk
-bMCQE/AsFwJBAOe22JWgT1kIlmPVOaid/XErVV9YYdy7SxkAhvQYzHagWfhQaGpX
-sMrX1D5i4eIO9JHRu5zPupCGXRWT43UWr7cCQAi61Smja1t7pqWCNvwz7TbRd89e
-6eyzYXL2BjuWuQEWAhwaRlXBYY2+8bSHy0srLncNVI2MOUy4XQoyQ47WlWUCQGZM
-vZZhrmZ6ehsdWlVtWyWJoil0FdCkB+XD69D82dhNtysAJPk+Odl0LEpW0a9CNwvh
-8tiqhY2lJJeQMU3SdEUCQQCxJ5bXPM5iVDBzV50l3DfDN71srr9KGdCahCuxQpRt
-3ZRkZkz9izeRgRM5GRbOM7xpMWKLXFF0E7Y7jF3aa6xD
------END RSA PRIVATE KEY-----
-'''
-
-FIXME_public_key = '''
------BEGIN PUBLIC KEY-----
-MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDYrIBJjY822hL90KbvGz/FfbrU
-bDfCcScc1IzUn95O1I+AXwBXyaSh0HJhXEztBvKkfD9+Kq7Blx8EmRfGo6ziT+fZ
-0mE0WhZv87nFwvedApsCwTEt/r3VNNsRmwGGSXxTlbYj1OB3QdGeyl9Gk127akSR
-BBet7Y2XCezOu809cQIDAQAB
------END PUBLIC KEY-----
-'''
-
-
-def long2intarr(long_int):
-    _bytes = []
-    while long_int:
-        long_int, r = divmod(long_int, 256)
-        _bytes.insert(0, r)
-    return _bytes
-
-
-def long_to_base64(n):
-    bys = long2intarr(n)
-    data = struct.pack('%sB' % len(bys), *bys)
-    if not len(data):
-        data = '\x00'
-    s = base64.urlsafe_b64encode(data).rstrip(b'=')
-    return s.decode("ascii")
-
-
-public_key_obj = serialization.load_pem_public_key(
-    FIXME_public_key,
-    backend=default_backend())
-
-public_key_numbers = public_key_obj.public_numbers()
-exponent = long_to_base64(public_key_numbers.e)
-modulus = long_to_base64(public_key_numbers.n)
-FIXME_jwks_with_public_key = {
-    'keys': [{
-        'e': exponent,
-        'n': modulus,
-        'kid': 'TESTKID',
-        'kty': 'RSA',
-        'alg': 'RS256',
-        'use': 'sig'
-    }]
-}
-# END FIXME
+# FIXME: Remove the '0.1:7777' hack below
+#        Decide how we should validate ISS claims.
+allowed_domains = ['okta.com', 'oktapreview.com', '0.1:7777']
+# FIXME: Decide on the right way to validate Key IDs (KID)
+not_alpha_numeric = re.compile('[^a-zA-Z0-9_]+')
+public_key_cache = {}
 
 oidc = None
 with open('.samples.config.json') as config_file:
@@ -114,13 +46,75 @@ user = {
     }
 }
 
+
+def domain_name_for(url):
+    second_to_last_element = -2
+    domain_parts = url.netloc.split('.')
+    (sld, tld) = domain_parts[second_to_last_element:]
+    return sld + '.' + tld
+
+
+def fetch_jwk_for(id_token=None):
+    if id_token is None:
+        raise NameError('id_token is required')
+
+    dirty_header = jws.get_unverified_header(id_token)
+    cleaned_key_id = None
+    if 'kid' in dirty_header:
+        # FIXME: Decide on a standard way to do KID validation.
+        dirty_key_id = dirty_header['kid']
+        cleaned_key_id = re.sub(not_alpha_numeric, '', dirty_key_id)
+    else:
+        raise ValueError('The id_token header must contain a "kid"')
+    if cleaned_key_id in public_key_cache:
+        return public_key_cache[cleaned_key_id]
+
+    # FIXME: Determine what the proper way to do ISS validation is,
+    #        then fix the block below:
+    # START FIXME
+    # Uncomment the block below!
+    '''
+    unverified_claims = jwt.get_unverified_claims(id_token)
+    dirty_url = urlparse.urlparse(unverified_claims['iss'])
+    domain_name = domain_name_for(dirty_url)
+    if domain_name not in allowed_domains:
+        # FIXME: Decide on standard way to validate the ISS claim.
+        error_string = "The domain ({}) in the issuer claim is not allowed".format(domain_name)
+        raise ValueError(error_string)
+    cleaned_issuer = dirty_url.geturl()
+    oidc_discovery_url = "{}/.well-known/openid-configuration".format(
+        cleaned_issuer)
+
+    # FIXME: Decide on standard way to do auto-discovery
+    r = requests.get(oidc_discovery_url)
+    openid_configuration = r.json()
+    if 'jwks_uri' in openid_configuration:
+        jwks_uri = openid_configuration['jwks_uri']
+    '''
+    jwks_uri = "http://127.0.0.1:7777/oauth2/v1/keys"
+    # END FIXME
+
+    r = requests.get(jwks_uri)
+    jwks = r.json()
+    for key in jwks['keys']:
+        jwk_id = key['kid']
+        public_key_cache[jwk_id] = key
+
+    if cleaned_key_id in public_key_cache:
+        return public_key_cache[cleaned_key_id]
+    else:
+        raise RuntimeError("Unable to fetch public key from jwks_uri")
+
+
 @app.route("/")
 def scenarios():
     return render_template('index', oidc=oidc)
 
+
 @app.route("/authorization-code/login-redirect")
 def auth_login_redirect():
     return render_template('index', oidc=oidc)
+
 
 @app.route("/authorization-code/login-custom")
 def auth_login_custom():
@@ -146,17 +140,18 @@ def auth_profile():
     resp.set_cookie('okta-oauth-redirect-params', '', expires=0)
     return resp
 
+
 @app.route("/authorization-code/callback")
 def auth_callback():
     nonce = None
     state = None
 
-    if (('okta-oauth-nonce' in request.cookies) and
-        ('okta-oauth-state' in request.cookies)):
-        nonce = request.cookies['okta-oauth-nonce']
-        state = request.cookies['okta-oauth-state']
-    elif 'okta-oauth-redirect-params' in request.cookies:
-        redirectParamsContent = request.cookies['okta-oauth-redirect-params']
+    cookies = request.cookies
+    if (('okta-oauth-nonce' in cookies) and ('okta-oauth-state' in cookies)):
+        nonce = cookies['okta-oauth-nonce']
+        state = cookies['okta-oauth-state']
+    elif 'okta-oauth-redirect-params' in cookies:
+        redirectParamsContent = cookies['okta-oauth-redirect-params']
         redirectParams = json.loads(redirectParamsContent)
         nonce = redirectParams['nonce']
         state = redirectParams['state']
@@ -171,74 +166,68 @@ def auth_callback():
         return "no code in request arguments", 401
 
     auth = HTTPBasicAuth(oidc['clientId'], oidc['clientSecret'])
-    # START FIXME
-    # The code below is so we can pass the yakbak tests
-    # Ideally, I shouldn't need any of this
     querystring = {
         'grant_type': 'authorization_code',
         'code': request.args.get('code'),
         'redirect_uri': oidc['redirectUri']
     }
+    # START FIXME
+    # The code below is so we can pass the yakbak tests
+    # Ideally, I shouldn't need any of this
     qs = "grant_type=authorization_code&code={}&redirect_uri={}".format(
-        urllib.quote_plus(request.args.get('code')),
-        urllib.quote_plus(oidc['redirectUri'])
+        urllib.quote_plus(querystring['code']),
+        urllib.quote_plus(querystring['redirect_uri'])
         )
-    headers = {
-        'User-Agent': None,
-        'Authorization': 'Basic: NVZObTF4WjZ0bnI4YURlR3JIV2Y6bm9SR08wZGJXR044cWFWb05sLTBQakVRQXRyc0IxOHU0cGJtOTZ5Mg==',
-        'Connection': 'close',
-        'Accept': None,
-        'Content-Type': 'application/x-www-form-urlencoded'
-    }
     # END FIXME
 
+    url = "{}/oauth2/v1/token".format(oidc['oktaUrl'])
     # FIXME: This URL shouldn't need the query string
     url = "{}/oauth2/v1/token?{}".format(oidc['oktaUrl'], qs)
-    
+
     r = requests.post(url,
-                      stream=False,
-                      # auth=auth,
+                      # FIXME: This is to force Requests into sending:
+                      #        'application/x-www-form-urlencoded'
+                      #        as the Content-Type. How can we remove this?
+                      data={'': ''},
                       # params=querystring,
-                      headers=headers)
+                      auth=auth)
     return_value = r.json()
+    print(return_value)
     if 'id_token' not in return_value:
         return "no id_token in response from /token endpoint", 401
     id_token = return_value['id_token']
 
-    # START FIXME
-    # Remove this code once the test server sends back JWTs
-    FIXME_claims = jwt.get_unverified_claims(id_token)
-    FIXME_headers = jwt.get_unverified_header(id_token)
-    del FIXME_headers['alg']
-    del FIXME_claims['at_hash']
-    # WARNING WARNING WARNING
-    #
-    # This is an ugly hack to RE-ENCODE the id_token we got
-    # so we can can pass tests that send us unsigned JWTs:
-    FIXME_id_token = pyjwt.encode(FIXME_claims,
-                                FIXME_private_key,
-                                algorithm='RS256',
-                                headers=FIXME_headers)
-    #
-    # WARNING WARNING WARNING
-    # END FIXME
-
-    leeway = 300
+    five_minutes_in_seconds = 300
+    leeway = five_minutes_in_seconds
+    jwt_kwargs = {
+        'algorithms': 'RS256',
+        'options': {
+            # FIXME: Remove when mock server returns valid access_tokens
+            'verify_at_hash': False,
+            'leeway': leeway
+        },
+        'issuer': oidc['oktaUrl'],
+        'audience': oidc['clientId']
+        }
+    if 'access_token' in return_value:
+        jwt_kwargs['access_token'] = return_value['access_token']
     try:
+        jwks_with_public_key = fetch_jwk_for(id_token)
         claims = jwt.decode(
-            FIXME_id_token,
-            FIXME_jwks_with_public_key,
-            algorithms='RS256',
-            issuer=oidc['oktaUrl'],
-            options={'leeway': leeway},
-            audience=oidc['clientId'])
-    except JWTClaimsError as e:
-        return str(e), 401
-    except ExpiredSignatureError as e:
-        return str(e), 401
+            id_token,
+            jwks_with_public_key,
+            **jwt_kwargs)
+    except (jose.exceptions.JWTClaimsError,
+            jose.exceptions.JWTError,
+            jose.exceptions.JWSError,
+            jose.exceptions.ExpiredSignatureError,
+            NameError,
+            ValueError), err:
+        return str(err), 401
     if nonce != claims['nonce']:
         return "invalid nonce", 401
-    acceptable_iat = calendar.timegm((datetime.utcnow() + timedelta(seconds=leeway)).timetuple())
+    time_now_with_leeway = datetime.utcnow() + timedelta(seconds=leeway)
+    acceptable_iat = calendar.timegm((time_now_with_leeway).timetuple())
     if 'iat' in claims and claims['iat'] > acceptable_iat:
         return "invalid iat claim", 401
 
@@ -248,7 +237,9 @@ def auth_callback():
         }
     return redirect(url_for('auth_profile'))
 
-# FIXME: I shouldn't need to define this once we get static assets in a dedicated statics directory:
+
+# FIXME: I shouldn't need to define this once we get static assets
+#        in a dedicated statics directory:
 @app.route('/bundle.js')
 def bundlejs():
     return app.send_static_file('bundle.js')
@@ -257,4 +248,3 @@ def bundlejs():
 if __name__ == "__main__":
     app.debug = True
     app.run(port=3000)
-
