@@ -3,7 +3,6 @@ from datetime import timedelta
 import calendar
 import json
 import os
-import re
 import urllib
 
 from flask import Flask
@@ -26,11 +25,13 @@ app = Flask(__name__,
             template_folder='{}/tools/templates'.format(cwd))
 # FIXME: Indicate that this is meant to be determined by the end user.
 app.secret_key = 'this is secret!'
-# FIXME: Remove the '0.1:7777' hack below
-#        Decide how we should validate ISS claims.
-allowed_domains = ['okta.com', 'oktapreview.com', '0.1:7777']
-# FIXME: Decide on the right way to validate Key IDs (KID)
-not_alpha_numeric = re.compile('[^a-zA-Z0-9_]+')
+# FIXME: Remove the ':7777' hack below
+allowed_issuers = []
+# FIXME: This should come from an environment variable
+allowed_issuers.append("http://127.0.0.1:7777")
+# NOTE: We should consider having LRU/MRU config here
+# OR!
+# http://pythonhosted.org/cachetools/#memoizing-decorators
 public_key_cache = {}
 
 oidc = None
@@ -47,61 +48,45 @@ user = {
 }
 
 
-def domain_name_for(url):
-    second_to_last_element = -2
-    domain_parts = url.netloc.split('.')
-    (sld, tld) = domain_parts[second_to_last_element:]
-    return sld + '.' + tld
-
-
 def fetch_jwk_for(id_token=None):
     if id_token is None:
         raise NameError('id_token is required')
 
-    dirty_header = jws.get_unverified_header(id_token)
-    cleaned_key_id = None
-    if 'kid' in dirty_header:
-        # FIXME: Decide on a standard way to do KID validation.
-        dirty_key_id = dirty_header['kid']
-        cleaned_key_id = re.sub(not_alpha_numeric, '', dirty_key_id)
-    else:
-        raise ValueError('The id_token header must contain a "kid"')
-    if cleaned_key_id in public_key_cache:
-        return public_key_cache[cleaned_key_id]
-
-    # FIXME: Determine what the proper way to do ISS validation is,
-    #        then fix the block below:
+    # FIXME: Make sure TLS layer is configured
     # START FIXME
-    # Uncomment the block below!
-    '''
-    unverified_claims = jwt.get_unverified_claims(id_token)
-    dirty_url = urlparse.urlparse(unverified_claims['iss'])
-    domain_name = domain_name_for(dirty_url)
-    if domain_name not in allowed_domains:
-        # FIXME: Decide on standard way to validate the ISS claim.
-        error_string = "The domain ({}) in the issuer claim is not allowed".format(domain_name)
-        raise ValueError(error_string)
-    cleaned_issuer = dirty_url.geturl()
-    oidc_discovery_url = "{}/.well-known/openid-configuration".format(
-        cleaned_issuer)
-
-    # FIXME: Decide on standard way to do auto-discovery
-    r = requests.get(oidc_discovery_url)
-    openid_configuration = r.json()
-    if 'jwks_uri' in openid_configuration:
-        jwks_uri = openid_configuration['jwks_uri']
-    '''
+    #     The generator should support auto-discovery
+    # clean_iss = None
+    # dirty_iss = jwt.get_unverified_claims(id_token).get('iss')
+    # if dirty_iss in allowed_issuers:
+    #     clean_iss = dirty_iss
+    # oidc_discovery_url = "{}/.well-known/openid-configuration".format(
+    #     clean_iss)
+    # r = requests.get(oidc_discovery_url)
+    # openid_configuration = r.json()
+    # if 'jwks_uri' in openid_configuration:
+    #     jwks_uri = openid_configuration['jwks_uri']
     jwks_uri = "http://127.0.0.1:7777/oauth2/v1/keys"
     # END FIXME
 
+    unverified_header = jws.get_unverified_header(id_token)
+    key_id = None
+    if 'kid' in unverified_header:
+        key_id = unverified_header['kid']
+    else:
+        raise ValueError('The id_token header must contain a "kid"')
+    if key_id in public_key_cache:
+        return public_key_cache[key_id]
+
+    # FIXME: Make sure that we rate-limit outbound requests
+    # (Karl used bucket rate limiting here "leaky bucket")
     r = requests.get(jwks_uri)
     jwks = r.json()
     for key in jwks['keys']:
         jwk_id = key['kid']
         public_key_cache[jwk_id] = key
 
-    if cleaned_key_id in public_key_cache:
-        return public_key_cache[cleaned_key_id]
+    if key_id in public_key_cache:
+        return public_key_cache[key_id]
     else:
         raise RuntimeError("Unable to fetch public key from jwks_uri")
 
@@ -141,6 +126,7 @@ def auth_profile():
     return resp
 
 
+# FIXME: Do PKCE validation here
 @app.route("/authorization-code/callback")
 def auth_callback():
     nonce = None
@@ -183,6 +169,12 @@ def auth_callback():
     url = "{}/oauth2/v1/token".format(oidc['oktaUrl'])
     # FIXME: This URL shouldn't need the query string
     url = "{}/oauth2/v1/token?{}".format(oidc['oktaUrl'], qs)
+    headers = {
+        'User-Agent': None,
+        'Connection': 'close',
+        'Accept': None,
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
 
     r = requests.post(url,
                       # FIXME: This is to force Requests into sending:
@@ -190,6 +182,7 @@ def auth_callback():
                       #        as the Content-Type. How can we remove this?
                       data={'': ''},
                       # params=querystring,
+                      headers=headers,
                       auth=auth)
     return_value = r.json()
     print(return_value)
@@ -197,13 +190,20 @@ def auth_callback():
         return "no id_token in response from /token endpoint", 401
     id_token = return_value['id_token']
 
+    # FIXME: This code should be factored out
+    #        so it can be shared across bearer flow and OAuth flows.
     five_minutes_in_seconds = 300
     leeway = five_minutes_in_seconds
     jwt_kwargs = {
+        # FIXME: This should be whitelisted?
+        # Fixme: However, if we add whitelist,
+        #        consider that algos could be swapped
+        #        and HMAC'ed with the public key (WOW!)
         'algorithms': 'RS256',
         'options': {
             # FIXME: Remove when mock server returns valid access_tokens
             'verify_at_hash': False,
+            # Used for leeway on the "exp" claim
             'leeway': leeway
         },
         'issuer': oidc['oktaUrl'],
@@ -217,6 +217,11 @@ def auth_callback():
             id_token,
             jwks_with_public_key,
             **jwt_kwargs)
+    # FIXME: Do what Karl does: https://git.io/v1D8S
+    # 401/403 per spec
+    # Only when barer token is used: https://tools.ietf.org/html/rfc6750
+    # NOTE: For production systems,
+    #       these errors should be opaque and logged rather than returned.
     except (jose.exceptions.JWTClaimsError,
             jose.exceptions.JWTError,
             jose.exceptions.JWSError,
@@ -226,6 +231,8 @@ def auth_callback():
         return str(err), 401
     if nonce != claims['nonce']:
         return "invalid nonce", 401
+    # Validate 'iat' claim
+    # FIXME: Open PR for moving this code here: https://git.io/v1D8M
     time_now_with_leeway = datetime.utcnow() + timedelta(seconds=leeway)
     acceptable_iat = calendar.timegm((time_now_with_leeway).timetuple())
     if 'iat' in claims and claims['iat'] > acceptable_iat:
