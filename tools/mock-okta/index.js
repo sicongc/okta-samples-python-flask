@@ -67,10 +67,6 @@ function getCookieName(cookieStr) {
  * Helper function that transforms and sends the response headers
  */
 function sendHeaders(res, headers, data, setHeader) {
-  if (res.headersSent) {
-    return;
-  }
-
   // If data.cookies exists, it means that we need to delete them in the
   // response headers unless they are already being set by the server
   if (data.cookie) {
@@ -112,6 +108,33 @@ function sendHeaders(res, headers, data, setHeader) {
   Object.keys(mapped).forEach((key) => {
     setHeader.call(res, key, mapped[key]);
   });
+}
+
+/**
+ * Helper function that concatenates and transforms the response buffer chunks
+ */
+function getResponseBody(headers, chunks, data) {
+  const gzipped = headers['content-encoding'] === 'gzip';
+  const contentType = headers['content-type'];
+  const attemptTransform = contentType && (
+    contentType.indexOf('text/html') > -1 ||
+    contentType.indexOf('application/json') > -1
+  );
+
+  let resBody = Buffer.concat(chunks);
+
+  if (attemptTransform) {
+    if (gzipped) {
+      resBody = zlib.gunzipSync(resBody);
+    }
+    const str = util.mapCachedBodyToResponse(resBody.toString('utf8'), data);
+    resBody = new Buffer(str, 'utf8');
+    if (gzipped) {
+      resBody = zlib.gzipSync(resBody);
+    }
+  }
+
+  return resBody;
 }
 
 // ----------------------------------------------------------------------------
@@ -185,17 +208,28 @@ function transform(req, res, next) {
   // Override the original res.setHeader - to override values, we queue the
   // setHeader calls and batch transform/send them when the response is sent
   const setHeader = res.setHeader;
-  const resHeaders = {};
+  const resHeaders = { 'transfer-encoding': 'chunked' };
   res.setHeader = (name, value) => {
     resHeaders[name] = value;
   };
 
-  // Override the original res.end - this is used to set any final
-  // modifications, and to send the headers when there is no response body
+  // Override the original res.write - collect all res.write calls, remember
+  // the encoding, and send the entire response body when res.end is called.
+  // This is necessary because it's possible that the part of the response
+  // we want to modify (links to resources, etc) can be split between two
+  // response chunks.
+  let resEncoding;
+  const resChunks = [];
+  const write = res.write;
+  res.write = (chunk, encoding) => {
+    resEncoding = encoding;
+    resChunks.push(chunk);
+  };
+
+  // Override the original res.end - send headers and response body, and store
+  // any values that need to be remembered in subsequent requests.
   const end = res.end;
   res.end = () => {
-    // Normally, headers are flushed before writing the response. However, if
-    // there is no response body, we'll catch it here
     sendHeaders(res, resHeaders, data, setHeader);
 
     const redirectUrl = res._headers && res._headers.location;
@@ -217,33 +251,8 @@ function transform(req, res, next) {
     }
 
     debug(`Sending response with statusCode ${chalk.bold(res.statusCode)}`);
+    write.call(res, getResponseBody(resHeaders, resChunks, data), resEncoding);
     end.call(res);
-  };
-
-  // Override the original res.write - parses the response body and replaces
-  // proxied urls with the proxy, and updates the id_token when necessary
-  const write = res.write;
-  res.write = (chunk, encoding) => {
-    sendHeaders(res, resHeaders, data, setHeader);
-
-    const headers = res._headers;
-    const contentType = headers['content-type'];
-    const gzipped = headers['content-encoding'] === 'gzip';
-
-    // Rewrite html and json responses
-    const isHtml = contentType && contentType.indexOf('text/html') > -1;
-    const isJson = contentType && contentType.indexOf('application/json') > -1;
-    if (isHtml || isJson) {
-      if (gzipped) {
-        chunk = zlib.gunzipSync(chunk);
-      }
-      const chunkStr = util.mapCachedBodyToResponse(chunk.toString('utf8'), data);
-      chunk = new Buffer(chunkStr, 'utf8');
-      if (gzipped) {
-        chunk = zlib.gzipSync(chunk);
-      }
-    }
-    write.call(res, chunk, encoding);
   };
 
   next();

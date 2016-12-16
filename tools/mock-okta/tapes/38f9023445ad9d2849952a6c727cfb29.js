@@ -21,12 +21,12 @@ module.exports = function (req, res) {
   res.statusCode = 200;
 
   res.setHeader("server", "Apache-Coyote/1.1");
-  res.setHeader("x-okta-request-id", "reqflMPGNChTOiI3lSlrFqTIA");
+  res.setHeader("x-okta-request-id", "req4-dGKcxJSNmIHdMcItQMlg");
   res.setHeader("x-rate-limit-limit", "10000");
   res.setHeader("x-rate-limit-remaining", "9993");
-  res.setHeader("x-rate-limit-reset", "1481275409");
+  res.setHeader("x-rate-limit-reset", "1481839882");
   res.setHeader("p3p", "CP=\"HONK\"");
-  res.setHeader("set-cookie", ["sid=\"\"; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/","JSESSIONID=2488F2A15E23E0FF25C8DE8E987C3A23; Path=/","DT=DI0jRn5MBC0TCaWBvMn1AVjsA; Expires=Sun, 09-Dec-2018 09:22:34 GMT; Path=/","JSESSIONID=2488F2A15E23E0FF25C8DE8E987C3A23; Path=/"]);
+  res.setHeader("set-cookie", ["sid=\"\"; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/","JSESSIONID=D0AFD806775BCCFBD6F4284091B9B6FB; Path=/","DT=DI05mOprQB1RIu3TptdM4TkVA; Expires=Sat, 15-Dec-2018 22:10:25 GMT; Path=/","JSESSIONID=D0AFD806775BCCFBD6F4284091B9B6FB; Path=/"]);
   res.setHeader("access-control-allow-origin", "http://localhost:3000");
   res.setHeader("access-control-allow-methods", "GET, DELETE, OPTIONS");
   res.setHeader("access-control-allow-credentials", "true");
@@ -39,7 +39,7 @@ module.exports = function (req, res) {
   res.setHeader("x-frame-options", "SAMEORIGIN");
   res.setHeader("allow", "GET, HEAD, POST, PUT, DELETE, TRACE, OPTIONS, PATCH");
   res.setHeader("content-length", "0");
-  res.setHeader("date", "Fri, 09 Dec 2016 09:22:33 GMT");
+  res.setHeader("date", "Thu, 15 Dec 2016 22:10:25 GMT");
 
   res.setHeader("x-yakbak-tape", path.basename(__filename, ".js"));
 

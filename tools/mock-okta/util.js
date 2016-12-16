@@ -153,8 +153,15 @@ util.mapRequestToCache = (req) => {
   headers['accept-encoding'] = 'gzip';
 
   // Enforce a consistent accept for html responses
-  if (headers.accept && headers.accept.indexOf('text/html') > -1) {
-    headers.accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8';
+  /* istanbul ignore next */
+  if (headers.accept) {
+    if (headers.accept.indexOf('text/html') > -1) {
+      headers.accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8';
+    } else if (headers.accept.indexOf('json') > -1) {
+      headers.accept = 'application/json';
+    } else {
+      headers.accept = '*/*';
+    }
   }
 
   // Enforce 'application/json' on api requests - PhantomJs does not send a
