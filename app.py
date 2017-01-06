@@ -207,7 +207,7 @@ def auth_callback():
             **jwt_kwargs)
     # FIXME: Do what Karl does: https://git.io/v1D8S
     # 401/403 per spec
-    # Only when barer token is used: https://tools.ietf.org/html/rfc6750
+    # Only when bearer token is used: https://tools.ietf.org/html/rfc6750
     # NOTE: For production systems,
     #       these errors should be opaque and logged rather than returned.
     except (jose.exceptions.JWTClaimsError,
