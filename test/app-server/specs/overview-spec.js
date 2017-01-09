@@ -10,6 +10,10 @@
  * See the License for the specific language governing permissions and limitations under the License.
  */
 
-require('./specs/basic-spec');
-require('./specs/overview-spec');
-require('./specs/authorization-code-spec');
+const util = require('../lib/util');
+
+describe('Overview', () => {
+  describe('GET /', () => {
+    util.itLoadsTemplateFor('overview', () => util.get('/'));
+  });
+});

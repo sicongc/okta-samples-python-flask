@@ -10,9 +10,12 @@
  * See the License for the specific language governing permissions and limitations under the License.
  */
 
+'use strict';
+
 const chai = require('chai');
 const chaiHttp = require('chai-http');
 const config = require('../../../.samples.config.json');
+const errors = require('./errors');
 
 const expect = chai.expect;
 const util = module.exports = {};
@@ -39,10 +42,33 @@ util.agent = () => chai.request.agent(baseAppUrl);
 util.get = path => util.request().get(path).send();
 
 /**
- * Sends a /set request to the test mock-server to set expectations for the
+ * Sends a /mock/set request to the test mock-server to set expectations for the
  * next request.
  */
-util.mockOktaRequest = () => chai.request(baseMockOktaUrl);
+util.mockOktaRequest = reqs => (
+  chai.request(baseMockOktaUrl).post('/mock/set').send(reqs)
+);
+
+util.mockVerify = () => (
+  chai.request(baseMockOktaUrl).post('/mock/done').send()
+);
+
+/**
+ * Helper function to construct nested objects.
+ *
+ * Example:
+ * util.expand('a.b.c', 3) -> { a: { b: c: 3 } }
+ */
+util.expand = (key, val) => {
+  const parts = key.split('.');
+  const obj = {};
+  let cursor = obj;
+  parts.forEach((part, i) => {
+    cursor[part] = i === parts.length - 1 ? val : {};
+    cursor = cursor[part];
+  });
+  return obj;
+};
 
 /**
  * Verifies that the response sets a 401 status code
@@ -108,7 +134,7 @@ util.shouldNotRedirect = (reqPromise, msg) => (
  * possible (or desired) to use the template - in that case, we only check that
  * the response matches the minimum to serve the frontend assets.
  */
-util.itLoadsTemplateFor = (reqFn) => {
+util.itLoadsTemplateFor = (docPartial, reqFn) => {
   function hasBodyText(text) {
     return reqFn().then(res => expect(res.text).to.contain(text));
   }
@@ -133,5 +159,11 @@ util.itLoadsTemplateFor = (reqFn) => {
   ));
   it('runs bootstrap', () => (
     hasBodyText('bundle.bootstrap(')
+  ));
+  it('includes the correct doc partial', () => (
+    hasBodyText(`class="doc-${docPartial}"`).catch(() => {
+      const err = `Expected docs/${docPartial}.mustache to be loaded`;
+      throw new Error(`${err}\n${errors.DOC_PARTIAL}`);
+    })
   ));
 };

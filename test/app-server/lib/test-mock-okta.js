@@ -13,12 +13,15 @@
 /**
  * Simple test server that mocks requests to Okta.
  *
- * Basic behavior:
- * 1. Send a /set request to prime the next response:
- *    - Send a 'req' object to validate the next request against
- *    - Send a 'res' object that will be sent back after validation passes
- * 2. Make a request to the test server. If 'req' validation passes, it will
+ * Basic flow:
+ * 1. Send /mock/set request to prime the expected requests for the test. It
+ *    should send a json array of objects representing the requests:
+ *    - 'req' property to validate the next request against
+ *    - 'res' property that will be sent back after validation passes
+ * 2. Make requests to the test server. If 'req' validation passes, it will
  *    return a JSON response with a 'res' response body.
+ * 3. Send /mock/done request to clear expectations, and return an error if
+ *    any non-optional requests were not invoked.
  */
 
 /* eslint no-param-reassign: 0, no-console:0 */
@@ -29,20 +32,28 @@ const http = require('http');
 
 const config = require('../../../.samples.config.json');
 
-// State variables that keep track of the next request/response pair.
-// Note that this only allows for one request at a time!
-let nextRequest;
-let nextResponse;
+let mocks = [];
 
 function handleSetRequest(req, res) {
   const chunks = [];
   req.on('data', chunk => chunks.push(chunk));
   req.on('end', () => {
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-    nextRequest = body.req;
-    nextResponse = body.res;
+    mocks = JSON.parse(Buffer.concat(chunks).toString());
     res.end();
   });
+}
+
+function handleDoneRequest(req, res) {
+  let body;
+  const required = mocks.find(mock => !mock.optional);
+  if (required) {
+    body = `Missing required request: ${required.req.url}`;
+    res.statusCode = 500;
+  } else {
+    res.statusCode = 200;
+  }
+  mocks = [];
+  res.end(body);
 }
 
 function validateReq(expected, req) {
@@ -60,8 +71,16 @@ function validateReq(expected, req) {
 function handleNextRequest(req, res) {
   let body;
   try {
-    validateReq(nextRequest, req);
-    body = nextResponse;
+    if (mocks.length === 0) {
+      throw new Error(`Unexpected request: ${req.url}`);
+    }
+    const nextRequest = mocks.shift();
+    if (req.url !== nextRequest.req.url && nextRequest.optional) {
+      handleNextRequest(req, res);
+      return;
+    }
+    validateReq(nextRequest.req, req);
+    body = nextRequest.res;
   } catch (e) {
     res.statusCode = 500;
     body = {
@@ -75,8 +94,10 @@ function handleNextRequest(req, res) {
 
 const server = http.createServer((req, res) => {
   switch (req.url) {
-    case '/set':
+    case '/mock/set':
       return handleSetRequest(req, res);
+    case '/mock/done':
+      return handleDoneRequest(req, res);
     default:
       return handleNextRequest(req, res);
   }
