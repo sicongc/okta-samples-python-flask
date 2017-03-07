@@ -341,6 +341,7 @@
       - [Front End](#front-end)
         - [Login Redirect](#login-redirect)
         - [Custom Login Form](#custom-login-form)
+        - [Using a different front-end](#using-a-different-front-end)
       - [Back End](#back-end)
         - [Routes](#routes)
         - [Handle the Redirect](#handle-the-redirect)
@@ -374,19 +375,19 @@
 
     ## Prerequisites
 
-    This sample app depends on [Node.js](https://nodejs.org/en/) for frontend dependencies and some build scripts - if you don't have it, install it from [nodejs.org](https://nodejs.org/en/).
+    This sample app depends on [Node.js](https://nodejs.org/en/) for front-end dependencies and some build scripts - if you don't have it, install it from [nodejs.org](https://nodejs.org/en/).
 
     ```bash
     # Verify that node is installed
     $ node -v
     ```
 
-    Then, clone this sample from GitHub and install the frontend dependencies:
+    Then, clone this sample from GitHub and install the front-end dependencies:
     ```bash
     # Clone the repo and navigate to the samples-python-flask dir
     $ git clone git@github.com:okta/samples-python-flask.git && cd samples-python-flask
 
-    # Install the frontend dependencies
+    # Install the front-end dependencies
     [samples-python-flask]$ npm install
     ```
 
@@ -495,6 +496,28 @@
     To perform the [Authorization Code Flow](https://tools.ietf.org/html/rfc6749#section-1.3.1), we set the `responseType` to `code`. This returns an `access_token` and/or `id_token` through the [`/token`](http://developer.okta.com/docs/api/resources/oauth2.html#token-request) OpenID Connect endpoint.
 
     ,**Note:** Additional configuration for the `SignIn` object is available at [OpenID Connect, OAuth 2.0, and Social Auth with Okta](https://github.com/okta/okta-signin-widget#configuration).
+
+    ### Using a different front-end
+
+    By default, this end-to-end sample ships with our [Angular 1 front-end sample](https://github.com/okta/samples-js-angular-1). To run this back-end with a different front-end:
+
+    1. Choose the front-end
+
+        | Framework | NPM module | Github |
+        |-----------|------------|--------|
+        | Angular 1 | [@okta/samples-js-angular-1](https://www.npmjs.com/package/@okta/samples-js-angular-1) | https://github.com/okta/samples-js-angular-1 |
+        | React | [@okta/samples-js-react](https://www.npmjs.com/package/@okta/samples-js-react) | https://github.com/okta/samples-js-react |
+        | Elm | [@okta/samples-elm](https://www.npmjs.com/package/@okta/samples-elm) | https://github.com/okta/samples-elm |
+
+
+    2. Install the front-end
+
+        ```bash
+        # Use the NPM module for the front-end you want to install. I.e. for React:
+        [samples-python-flask]$ npm install @okta/samples-js-react
+        ```
+
+    3. Restart the server. You should be up and running with the new front-end!
 
     ## Back-end
     To complete the [Authorization Code Flow](https://tools.ietf.org/html/rfc6749#section-1.3.1), your back-end server performs the following tasks:
