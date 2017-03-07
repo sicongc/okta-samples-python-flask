@@ -21,7 +21,7 @@
     "test:app-server-all": "mocha test/app-server/with-app-server-start --timeout 30000",
     "test": "npm run test:app-server-all && npm run test:docs && npm run test:e2e",
     "prestart": "build-frontend",
-    "start": "echo \"\n--- REPLACE THIS! ---\n\" && exit 1;",
+    "start": "./fake-heroku.sh",
     "test:docs": "mocha test/docs/specs/ --bail"
   },
   "devDependencies": {

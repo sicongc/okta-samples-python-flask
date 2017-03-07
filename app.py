@@ -21,7 +21,7 @@ import requests
 cwd = os.path.dirname(os.path.realpath(__file__))
 app = Flask(__name__,
             static_folder='dist',
-            static_url_path='',
+            static_url_path='/assets',
             template_folder='{}/tools/templates'.format(cwd))
 app.secret_key = 'SECRET KEY THAT YOU **MUST** CHANGE ON PRODUCTION SYSTEMS!'
 allowed_issuers = []
@@ -34,7 +34,7 @@ public_key_cache = {}
 config = None
 with open('.samples.config.json') as config_file:
     config_json = json.load(config_file)
-    config = config_json
+    config = config_json['oktaSample']
 
 
 # Get allowed issuer from the OKTA_ALLOWED_ISSUER environment variable,
@@ -60,7 +60,7 @@ def fetch_jwk_for(id_token=None):
     # openid_configuration = r.json()
     # if 'jwks_uri' in openid_configuration:
     #     jwks_uri = openid_configuration['jwks_uri']
-    jwks_uri = "http://127.0.0.1:7777/oauth2/v1/keys"
+    jwks_uri = "{}/oauth2/v1/keys".format(config['oidc']['oktaUrl'])
     # END FIXME
 
     unverified_header = jws.get_unverified_header(id_token)
@@ -88,23 +88,20 @@ def fetch_jwk_for(id_token=None):
 
 @app.route("/")
 def scenarios():
-    return render_template('index',
-                           config=config,
-                           partials={'doc': 'docs/overview'})
+    return render_template('overview',
+                           config=config)
 
 
 @app.route("/authorization-code/login-redirect")
 def auth_login_redirect():
-    return render_template('index',
-                           config=config,
-                           partials={'doc': 'docs/login-redirect'})
+    return render_template('login-redirect',
+                           config=config)
 
 
 @app.route("/authorization-code/login-custom")
 def auth_login_custom():
-    return render_template('index',
-                           config=config,
-                           partials={'doc': 'docs/login-custom'})
+    return render_template('login-custom',
+                           config=config)
 
 
 @app.route("/authorization-code/logout")
@@ -117,10 +114,9 @@ def auth_logout():
 def auth_profile():
     if 'user' not in session:
         return redirect(url_for('scenarios'))
-    return make_response(render_template('index',
+    return make_response(render_template('profile',
                                          user=session['user'],
-                                         config=config,
-                                         partials={'doc': 'docs/profile'}))
+                                         config=config))
 
 
 # FIXME: Do PKCE validation here
@@ -159,7 +155,7 @@ def auth_callback():
         urllib.quote_plus(querystring['redirect_uri'])
         )
     url = "{}/oauth2/v1/token?{}".format(config['oidc']['oktaUrl'], qs)
-
+    
     headers = {
         'User-Agent': None,
         'Connection': 'close',
@@ -167,7 +163,7 @@ def auth_callback():
         'Content-Type': 'application/x-www-form-urlencoded'
     }
     # END FIXME
-
+    
     r = requests.post(url,
                       # params=querystring,
                       stream=False,

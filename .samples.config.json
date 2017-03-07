@@ -8,7 +8,7 @@
     },
     "server": {
       "staticDir": "dist",
-      "startSignal": "webpack: Compiled successfully",
+      "startSignal": "Debugger pin code",
       "port": 3000,
       "framework": "Flask",
       "environment": "Python"

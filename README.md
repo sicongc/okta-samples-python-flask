@@ -20,7 +20,7 @@
   - [Conclusion](#conclusion)
   - [Support](#support)
   - [License](#license)
-  
+
 ## Introduction
 
 This tutorial will demonstrate how to use OAuth 2.0 and OpenID Connect to add authentication to a Python/Flask application.
@@ -59,14 +59,16 @@ $ git clone git@github.com:okta/samples-python-flask.git && cd samples-python-fl
 [samples-python-flask]$ npm install
 ```
 
-{{ SAMPLE-DEVELOPER: ADD EXTRA SETUP HERE }}
-
+```bash
+source venv/bin/activate
+pip install -r requirements.txt
+```
 
 ## Quick Start
 
-Start the back-end for your sample application with `npm start` or ` {{ SAMPLE-DEVELOPER: ADD START SCRIPT HERE }} `. This will start the app server on [http://localhost:3000](http://localhost:3000).
+Start the back-end for your sample application with `npm start` or `python app.py`. This will start the app server on [http://localhost:3000](http://localhost:3000).
 
-By default, this application uses a mock authorization server which responds to API requests like a configured Okta org - it's useful if you haven't yet set up OpenID Connect but would still like to try this sample. 
+By default, this application uses a mock authorization server which responds to API requests like a configured Okta org - it's useful if you haven't yet set up OpenID Connect but would still like to try this sample.
 
 To start the mock server, run the following in a second terminal window:
 ```bash
@@ -110,7 +112,7 @@ class LoginRedirectController {
       scopes: ['openid', 'email', 'profile'],
     });
   }
- 
+
   login() {
     this.authClient.token.getWithRedirect({ responseType: 'code' });
   }
@@ -124,7 +126,7 @@ There are a number of different ways to construct the login redirect URL.
 3. Use [AuthJS](http://developer.okta.com/code/javascript/okta_auth_sdk)
 
 In this sample, we use AuthJS to create the URL and perform the redirect. An `OktaAuth` object is instantiated with the configuration in `.samples.config.json`. When the `login()` function is called from the view, it calls the [`/authorize`](http://developer.okta.com/docs/api/resources/oauth2.html#authentication-request) endpoint to start the [Authorization Code Flow](https://tools.ietf.org/html/rfc6749#section-1.3.1).
- 
+
 
 You can read more about the `OktaAuth` configuration options here: [OpenID Connect with Okta AuthJS SDK](http://developer.okta.com/code/javascript/okta_auth_sdk#social-authentication-and-openid-connect).
 
@@ -145,7 +147,7 @@ class LoginCustomController {
   constructor(config) {
     this.config = config;
   }
- 
+
   $onInit() {
     const signIn = new SignIn({
       baseUrl: this.config.oktaUrl,
@@ -192,12 +194,59 @@ Two cookies are created after authentication: `okta-oauth-nonce` and `okta-auth-
 
 In this sample, we verify the state here:
 
-{{ SAMPLE-DEVELOPER: ADD CHECKING FOR COOKIES HERE }}
+```python
+cookies = request.cookies
+if (('okta-oauth-nonce' in cookies) and ('okta-oauth-state' in cookies)):
+    nonce = cookies['okta-oauth-nonce']
+    state = cookies['okta-oauth-state']
+else:
+    return "invalid nonce or state", 401
+if (request.args.get('state') != state):
+    err = "'{}' != '{}'".format(
+        request.args.get('state'),
+        state)
+    return "invalid state: {}".format(err), 401
+```
 
 ### Code Exchange
 Next, we exchange the returned authorization code for an `id_token` and/or `access_token`. You can choose the best [token authentication method](http://developer.okta.com/docs/api/resources/oauth2.html#token-request) for your application. In this sample, we use the default token authentication method `client_secret_basic`:
 
-{{ SAMPLE-DEVELOPER: ADD TOKEN REQUEST CODE HERE }}
+```python
+auth = HTTPBasicAuth(config['oidc']['clientId'],
+                     config['oidc']['clientSecret'])
+querystring = {
+    'grant_type': 'authorization_code',
+    'code': request.args.get('code'),
+    'redirect_uri': config['oidc']['redirectUri']
+}
+url = "{}/oauth2/v1/token".format(config['oidc']['oktaUrl'])
+# START FIXME
+# The code below is so we can pass the yakbak tests
+# Ideally, I shouldn't need any of this
+qs = "grant_type=authorization_code&code={}&redirect_uri={}".format(
+    urllib.quote_plus(querystring['code']),
+    urllib.quote_plus(querystring['redirect_uri'])
+    )
+url = "{}/oauth2/v1/token?{}".format(config['oidc']['oktaUrl'], qs)
+
+headers = {
+    'User-Agent': None,
+    'Connection': 'close',
+    'Accept': 'application/json',
+    'Content-Type': 'application/x-www-form-urlencoded'
+}
+# END FIXME
+
+r = requests.post(url,
+                  # params=querystring,
+                  stream=False,
+                  auth=auth,
+                  headers=headers)
+return_value = r.json()
+if 'id_token' not in return_value:
+    return "no id_token in response from /token endpoint", 401
+id_token = return_value['id_token']
+```
 
 A successful response returns an `id_token` which looks similar to:
 ```
@@ -215,9 +264,9 @@ ntFBNjluFhNLJIUkEFovEDlfuB4tv_M8BM75celdy3jkpOurg
 ```
 
 ### Validation
-After receiving the `id_token`, we [validate](http://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation) the token and its claims to prove its integrity. 
+After receiving the `id_token`, we [validate](http://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation) the token and its claims to prove its integrity.
 
-In this sample, we use the {{ SAMPLE-DEVELOPER: ADD TOKEN LIBRARY INFO HERE }} library to decode and validate the token.
+In this sample, we use a [JSON Object Signing and Encryption (JOSE)](https://github.com/mpdavis/python-jose) library to decode and validate the token.
 
 There are a couple things we need to verify:
 
@@ -235,7 +284,49 @@ For example:
 - If the `kid` has been cached, use it to validate the signature.
 - If not, make a request to the `jwks_uri`. Cache the new `jwks`, and use the response to validate the signature.
 
-{{ SAMPLE-DEVELOPER: ADD JWKS AND CACHING CODE HERE }}
+```python
+def fetch_jwk_for(id_token=None):
+    if id_token is None:
+        raise NameError('id_token is required')
+
+    # FIXME: Make sure TLS layer is configured
+    # START FIXME
+    #     The generator should support auto-discovery
+    # clean_iss = None
+    # dirty_iss = jwt.get_unverified_claims(id_token).get('iss')
+    # if dirty_iss in allowed_issuers:
+    #     clean_iss = dirty_iss
+    # oidc_discovery_url = "{}/.well-known/openid-configuration".format(
+    #     clean_iss)
+    # r = requests.get(oidc_discovery_url)
+    # openid_configuration = r.json()
+    # if 'jwks_uri' in openid_configuration:
+    #     jwks_uri = openid_configuration['jwks_uri']
+    jwks_uri = "{}/oauth2/v1/keys".format(config['oidc']['oktaUrl'])
+    # END FIXME
+
+    unverified_header = jws.get_unverified_header(id_token)
+    key_id = None
+    if 'kid' in unverified_header:
+        key_id = unverified_header['kid']
+    else:
+        raise ValueError('The id_token header must contain a "kid"')
+    if key_id in public_key_cache:
+        return public_key_cache[key_id]
+
+    # FIXME: Make sure that we rate-limit outbound requests
+    # (Karl used bucket rate limiting here "leaky bucket")
+    r = requests.get(jwks_uri)
+    jwks = r.json()
+    for key in jwks['keys']:
+        jwk_id = key['kid']
+        public_key_cache[jwk_id] = key
+
+    if key_id in public_key_cache:
+        return public_key_cache[key_id]
+    else:
+        raise RuntimeError("Unable to fetch public key from jwks_uri")
+```
 
 
 #### Verify fields
@@ -246,38 +337,92 @@ Verify the `id_token` from the [Code Exchange](#code-exchange) contains our expe
   - The `clientId` stored in our configuration matches the `aud` claim
   - If the token expiration time has passed, the token must be revoked
 
-{{ SAMPLE-DEVELOPER: ADD VERIFY FIELDS CODE HERE }}
-
+```python
+# FIXME: This code should be factored out
+#        so it can be shared across bearer flow and OAuth flows.
+five_minutes_in_seconds = 300
+leeway = five_minutes_in_seconds
+jwt_kwargs = {
+    # FIXME: This should be whitelisted?
+    # Fixme: However, if we add whitelist,
+    #        consider that algos could be swapped
+    #        and HMAC'ed with the public key (WOW!)
+    'algorithms': 'RS256',
+    'options': {
+        # FIXME: Remove when mock server returns valid access_tokens
+        'verify_at_hash': False,
+        # Used for leeway on the "exp" claim
+        'leeway': leeway
+    },
+    'issuer': config['oidc']['oktaUrl'],
+    'audience': config['oidc']['clientId']
+    }
+if 'access_token' in return_value:
+    jwt_kwargs['access_token'] = return_value['access_token']
+try:
+    jwks_with_public_key = fetch_jwk_for(id_token)
+    claims = jwt.decode(
+        id_token,
+        jwks_with_public_key,
+        **jwt_kwargs)
+# FIXME: Do what Karl does: https://git.io/v1D8S
+# 401/403 per spec
+# Only when bearer token is used: https://tools.ietf.org/html/rfc6750
+# NOTE: For production systems,
+#       these errors should be opaque and logged rather than returned.
+except (jose.exceptions.JWTClaimsError,
+        jose.exceptions.JWTError,
+        jose.exceptions.JWSError,
+        jose.exceptions.ExpiredSignatureError,
+        NameError,
+        ValueError), err:
+    return str(err), 401
+```
 
 #### Verify issued time
 The `iat` value indicates what time the token was "issued at". We verify that this claim is valid by checking that the token was not issued in the future, with some leeway for clock skew.
 
-{{ SAMPLE-DEVELOPER: ADD VERIFY IAT CODE HERE }}
+```python
+time_now_with_leeway = datetime.utcnow() + timedelta(seconds=leeway)
+acceptable_iat = calendar.timegm((time_now_with_leeway).timetuple())
+if 'iat' in claims and claims['iat'] > acceptable_iat:
+    return "invalid iat claim", 401
+```
 
 
 #### Verify nonce
 To mitigate replay attacks, verify that the `nonce` value in the `id_token` matches the `nonce` stored in the cookie `okta-oauth-nonce`.
 
-{{ SAMPLE-DEVELOPER: ADD VERIFY NONCE CODE HERE }}
+```python
+if nonce != claims['nonce']:
+    return "invalid nonce", 401
+```
 
 ### Set user session
 If the `id_token` passes validation, we can then set the `user` session in our application.
 
 In a production app, this code would lookup the `user` from a user store and set the session for that user. However, for simplicity, in this sample we set the session with the claims from the `id_token`.
 
-{{ SAMPLE-DEVELOPER: ADD SETTING USER SESSION CODE HERE }}
+```python
+session['user'] = {
+    'email': claims['email'],
+    'claims': claims
+    }
+```
 
 ### Logout
 In Flask, you can clear the the user session by:
 
-{{ SAMPLE-DEVELOPER: ADD LOGOUT CODE HERE }}
+```python
+session.clear()
+```
 
 The Okta session is terminated in our client-side code.
 
 ## Conclusion
 You have now successfully authenticated with Okta! Now what? With a user's `id_token`, you have basic claims into the user's identity. You can extend the set of claims by modifying the `response_type` and `scopes` to retrieve custom information about the user. This includes `locale`, `address`, `phone_number`, `groups`, and [more](http://developer.okta.com/docs/api/resources/oidc.html#scopes).
 
-## Support 
+## Support
 
 Have a question or see a bug? Email developers@okta.com. For feature requests, feel free to open an issue on this repo. If you find a security vulnerability, please follow our [Vulnerability Reporting Process](https://www.okta.com/vulnerability-reporting-policy/).
 
@@ -288,4 +433,3 @@ Copyright 2017 Okta, Inc. All rights reserved.
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0.
 
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
-
