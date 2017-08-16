@@ -21,7 +21,7 @@
   - [Conclusion](#conclusion)
   - [Support](#support)
   - [License](#license)
-
+  
 ## Introduction
 
 This tutorial will demonstrate how to use OAuth 2.0 and OpenID Connect to add authentication to a Python/Flask application.
@@ -69,20 +69,28 @@ pip install -r requirements.txt
 
 Start the back-end for your sample application with `npm start` or `python app.py`. This will start the app server on [http://localhost:3000](http://localhost:3000).
 
-By default, this application uses a mock authorization server which responds to API requests like a configured Okta org - it's useful if you haven't yet set up OpenID Connect but would still like to try this sample.
+By default, this application uses a mock authorization server which responds to API requests like a configured Okta org - it's useful if you haven't yet set up OpenID Connect but would still like to try this sample. 
 
 To start the mock server, run the following in a second terminal window:
 ```bash
-# Starts the mock Okta server at http://127.0.0.01:7777
+# Starts the mock Okta server at http://127.0.0.1:7777
 [samples-python-flask]$ npm run mock-okta
 ```
 
-If you'd like to test this sample against your own Okta org, follow [these steps to setup an OpenID Connect app](docs/assets/oidc-app-setup.md). Then, replace the *oidc* settings in `samples.config.json` to point to your new app:
+If you'd like to test this sample against your own Okta org, navigate to the Okta Developer Dashboard and follow these steps:
+
+1. Create a new **Web** application by selecting **Create New Application** from the *Applications* page.		
+2. After accepting the default configuration, select **Create Application** to redirect back to the *General Settings* of your application.		
+3. Copy the **Client ID** and **Client Secret**, as it will be needed for the client configuration.
+4. Finally, navigate to `https://{yourOktaDomain}.com/oauth2/default` to see if the [Default Authorization Server](https://developer.okta.com/docs/api/resources/oauth2.html#using-the-default-authorization-server) is setup. If not, [let us know](mailto:developers@okta.com).
+
+Then, replace the *oidc* settings in `.samples.config.json` to point to your new app:
 ```javascript
 // .samples.config.json
 {
   "oidc": {
-    "oktaUrl": "https://{{yourOktaOrg}}.oktapreview.com",
+    "oktaUrl": "https://{{yourOktaDomain}}.com",
+    "issuer": "https://{{yourOktaDomain}}.com/oauth2/default",
     "clientId": "{{yourClientId}}",
     "clientSecret": "{{yourClientSecret}}",
     "redirectUri": "http://localhost:3000/authorization-code/callback"
@@ -108,12 +116,13 @@ class LoginRedirectController {
    $onInit() {
     this.authClient = new OktaAuth({
       url: this.config.oktaUrl,
+      issuer: this.config.issuer,
       clientId: this.config.clientId,
       redirectUri: this.config.redirectUri,
       scopes: ['openid', 'email', 'profile'],
     });
   }
-
+ 
   login() {
     this.authClient.token.getWithRedirect({ responseType: 'code' });
   }
@@ -127,7 +136,6 @@ There are a number of different ways to construct the login redirect URL.
 3. Use [AuthJS](http://developer.okta.com/code/javascript/okta_auth_sdk)
 
 In this sample, we use AuthJS to create the URL and perform the redirect. An `OktaAuth` object is instantiated with the configuration in `.samples.config.json`. When the `login()` function is called from the view, it calls the [`/authorize`](http://developer.okta.com/docs/api/resources/oauth2.html#authentication-request) endpoint to start the [Authorization Code Flow](https://tools.ietf.org/html/rfc6749#section-1.3.1).
-
 
 You can read more about the `OktaAuth` configuration options here: [OpenID Connect with Okta AuthJS SDK](http://developer.okta.com/code/javascript/okta_auth_sdk#social-authentication-and-openid-connect).
 
@@ -148,13 +156,14 @@ class LoginCustomController {
   constructor(config) {
     this.config = config;
   }
-
+ 
   $onInit() {
     const signIn = new SignIn({
       baseUrl: this.config.oktaUrl,
       clientId: this.config.clientId,
       redirectUri: this.config.redirectUri,
       authParams: {
+        issuer: this.config.issuer,
         responseType: 'code',
         scopes: ['openid', 'email', 'profile'],
       },
@@ -242,15 +251,13 @@ querystring = {
     'code': request.args.get('code'),
     'redirect_uri': config['oidc']['redirectUri']
 }
-url = "{}/oauth2/v1/token".format(config['oidc']['oktaUrl'])
-# START FIXME
-# The code below is so we can pass the yakbak tests
-# Ideally, I shouldn't need any of this
+url = "{}/v1/token".format(config['oidc']['issuer'])
+
 qs = "grant_type=authorization_code&code={}&redirect_uri={}".format(
     urllib.quote_plus(querystring['code']),
     urllib.quote_plus(querystring['redirect_uri'])
     )
-url = "{}/oauth2/v1/token?{}".format(config['oidc']['oktaUrl'], qs)
+url = "{}/v1/token?{}".format(config['oidc']['issuer'], qs)
 
 headers = {
     'User-Agent': None,
@@ -258,10 +265,8 @@ headers = {
     'Accept': 'application/json',
     'Content-Type': 'application/x-www-form-urlencoded'
 }
-# END FIXME
 
 r = requests.post(url,
-                  # params=querystring,
                   stream=False,
                   auth=auth,
                   headers=headers)
@@ -287,7 +292,7 @@ ntFBNjluFhNLJIUkEFovEDlfuB4tv_M8BM75celdy3jkpOurg
 ```
 
 ### Validation
-After receiving the `id_token`, we [validate](http://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation) the token and its claims to prove its integrity.
+After receiving the `id_token`, we [validate](http://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation) the token and its claims to prove its integrity. 
 
 In this sample, we use a [JSON Object Signing and Encryption (JOSE)](https://github.com/mpdavis/python-jose) library to decode and validate the token.
 
@@ -312,21 +317,7 @@ def fetch_jwk_for(id_token=None):
     if id_token is None:
         raise NameError('id_token is required')
 
-    # FIXME: Make sure TLS layer is configured
-    # START FIXME
-    #     The generator should support auto-discovery
-    # clean_iss = None
-    # dirty_iss = jwt.get_unverified_claims(id_token).get('iss')
-    # if dirty_iss in allowed_issuers:
-    #     clean_iss = dirty_iss
-    # oidc_discovery_url = "{}/.well-known/openid-configuration".format(
-    #     clean_iss)
-    # r = requests.get(oidc_discovery_url)
-    # openid_configuration = r.json()
-    # if 'jwks_uri' in openid_configuration:
-    #     jwks_uri = openid_configuration['jwks_uri']
-    jwks_uri = "{}/oauth2/v1/keys".format(config['oidc']['oktaUrl'])
-    # END FIXME
+    jwks_uri = "{}/v1/keys".format(config['oidc']['issuer'])
 
     unverified_header = jws.get_unverified_header(id_token)
     key_id = None
@@ -337,8 +328,6 @@ def fetch_jwk_for(id_token=None):
     if key_id in public_key_cache:
         return public_key_cache[key_id]
 
-    # FIXME: Make sure that we rate-limit outbound requests
-    # (Karl used bucket rate limiting here "leaky bucket")
     r = requests.get(jwks_uri)
     jwks = r.json()
     for key in jwks['keys']:
@@ -351,7 +340,6 @@ def fetch_jwk_for(id_token=None):
         raise RuntimeError("Unable to fetch public key from jwks_uri")
 ```
 
-
 #### Verify fields
 
 Verify the `id_token` from the [Code Exchange](#code-exchange) contains our expected claims:
@@ -361,23 +349,16 @@ Verify the `id_token` from the [Code Exchange](#code-exchange) contains our expe
   - If the token expiration time has passed, the token must be revoked
 
 ```python
-# FIXME: This code should be factored out
-#        so it can be shared across bearer flow and OAuth flows.
 five_minutes_in_seconds = 300
 leeway = five_minutes_in_seconds
 jwt_kwargs = {
-    # FIXME: This should be whitelisted?
-    # Fixme: However, if we add whitelist,
-    #        consider that algos could be swapped
-    #        and HMAC'ed with the public key (WOW!)
     'algorithms': 'RS256',
     'options': {
-        # FIXME: Remove when mock server returns valid access_tokens
         'verify_at_hash': False,
         # Used for leeway on the "exp" claim
         'leeway': leeway
     },
-    'issuer': config['oidc']['oktaUrl'],
+    'issuer': config['oidc']['issuer'],
     'audience': config['oidc']['clientId']
     }
 if 'access_token' in return_value:
@@ -388,11 +369,6 @@ try:
         id_token,
         jwks_with_public_key,
         **jwt_kwargs)
-# FIXME: Do what Karl does: https://git.io/v1D8S
-# 401/403 per spec
-# Only when bearer token is used: https://tools.ietf.org/html/rfc6750
-# NOTE: For production systems,
-#       these errors should be opaque and logged rather than returned.
 except (jose.exceptions.JWTClaimsError,
         jose.exceptions.JWTError,
         jose.exceptions.JWSError,
@@ -411,7 +387,6 @@ acceptable_iat = calendar.timegm((time_now_with_leeway).timetuple())
 if 'iat' in claims and claims['iat'] > acceptable_iat:
     return "invalid iat claim", 401
 ```
-
 
 #### Verify nonce
 To mitigate replay attacks, verify that the `nonce` value in the `id_token` matches the `nonce` stored in the cookie `okta-oauth-nonce`.
