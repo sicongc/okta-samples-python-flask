@@ -21,7 +21,7 @@
   - [Conclusion](#conclusion)
   - [Support](#support)
   - [License](#license)
-  
+
 ## Introduction
 
 This tutorial will demonstrate how to use OAuth 2.0 and OpenID Connect to add authentication to a Python/Flask application.

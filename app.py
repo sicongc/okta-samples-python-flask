@@ -25,9 +25,7 @@ app = Flask(__name__,
             template_folder='{}/tools/templates'.format(cwd))
 app.secret_key = 'SECRET KEY THAT YOU **MUST** CHANGE ON PRODUCTION SYSTEMS!'
 allowed_issuers = []
-# NOTE: We should consider having LRU/MRU config here
-# OR!
-# http://pythonhosted.org/cachetools/#memoizing-decorators
+
 public_key_cache = {}
 
 
@@ -48,7 +46,6 @@ def fetch_jwk_for(id_token=None):
         raise NameError('id_token is required')
 
     jwks_uri = "{}/v1/keys".format(config['oidc']['issuer'])
-    # END FIXME
 
     unverified_header = jws.get_unverified_header(id_token)
     key_id = None
@@ -164,7 +161,7 @@ def auth_callback():
             # Used for leeway on the "exp" claim
             'leeway': leeway
         },
-        'issuer': config['oidc']['oktaUrl'],
+        'issuer': config['oidc']['issuer'],
         'audience': config['oidc']['clientId']
         }
     if 'access_token' in return_value:
