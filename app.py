@@ -25,9 +25,7 @@ app = Flask(__name__,
             template_folder='{}/tools/templates'.format(cwd))
 app.secret_key = 'SECRET KEY THAT YOU **MUST** CHANGE ON PRODUCTION SYSTEMS!'
 allowed_issuers = []
-# NOTE: We should consider having LRU/MRU config here
-# OR!
-# http://pythonhosted.org/cachetools/#memoizing-decorators
+
 public_key_cache = {}
 
 
@@ -39,7 +37,7 @@ with open('.samples.config.json') as config_file:
 
 # Get allowed issuer from the OKTA_ALLOWED_ISSUER environment variable,
 # use the 'oktaUrl' from our config file if that doesn't exist
-allowed_issuer = os.getenv('OKTA_ALLOWED_ISSUER', config['oidc']['oktaUrl'])
+allowed_issuer = os.getenv('OKTA_ALLOWED_ISSUER', config['oidc']['issuer'])
 allowed_issuers.append(allowed_issuer)
 
 
@@ -47,21 +45,7 @@ def fetch_jwk_for(id_token=None):
     if id_token is None:
         raise NameError('id_token is required')
 
-    # FIXME: Make sure TLS layer is configured
-    # START FIXME
-    #     The generator should support auto-discovery
-    # clean_iss = None
-    # dirty_iss = jwt.get_unverified_claims(id_token).get('iss')
-    # if dirty_iss in allowed_issuers:
-    #     clean_iss = dirty_iss
-    # oidc_discovery_url = "{}/.well-known/openid-configuration".format(
-    #     clean_iss)
-    # r = requests.get(oidc_discovery_url)
-    # openid_configuration = r.json()
-    # if 'jwks_uri' in openid_configuration:
-    #     jwks_uri = openid_configuration['jwks_uri']
-    jwks_uri = "{}/oauth2/v1/keys".format(config['oidc']['oktaUrl'])
-    # END FIXME
+    jwks_uri = "{}/v1/keys".format(config['oidc']['issuer'])
 
     unverified_header = jws.get_unverified_header(id_token)
     key_id = None
@@ -72,8 +56,6 @@ def fetch_jwk_for(id_token=None):
     if key_id in public_key_cache:
         return public_key_cache[key_id]
 
-    # FIXME: Make sure that we rate-limit outbound requests
-    # (Karl used bucket rate limiting here "leaky bucket")
     r = requests.get(jwks_uri)
     jwks = r.json()
     for key in jwks['keys']:
@@ -119,7 +101,6 @@ def auth_profile():
                                          config=config))
 
 
-# FIXME: Do PKCE validation here
 @app.route("/authorization-code/callback")
 def auth_callback():
     nonce = None
@@ -146,15 +127,13 @@ def auth_callback():
         'code': request.args.get('code'),
         'redirect_uri': config['oidc']['redirectUri']
     }
-    url = "{}/oauth2/v1/token".format(config['oidc']['oktaUrl'])
-    # START FIXME
-    # The code below is so we can pass the yakbak tests
-    # Ideally, I shouldn't need any of this
+    url = "{}/v1/token".format(config['oidc']['issuer'])
+
     qs = "grant_type=authorization_code&code={}&redirect_uri={}".format(
         urllib.quote_plus(querystring['code']),
         urllib.quote_plus(querystring['redirect_uri'])
         )
-    url = "{}/oauth2/v1/token?{}".format(config['oidc']['oktaUrl'], qs)
+    url = "{}/v1/token?{}".format(config['oidc']['issuer'], qs)
     
     headers = {
         'User-Agent': None,
@@ -162,7 +141,6 @@ def auth_callback():
         'Accept': 'application/json',
         'Content-Type': 'application/x-www-form-urlencoded'
     }
-    # END FIXME
     
     r = requests.post(url,
                       # params=querystring,
@@ -174,23 +152,16 @@ def auth_callback():
         return "no id_token in response from /token endpoint", 401
     id_token = return_value['id_token']
 
-    # FIXME: This code should be factored out
-    #        so it can be shared across bearer flow and OAuth flows.
     five_minutes_in_seconds = 300
     leeway = five_minutes_in_seconds
     jwt_kwargs = {
-        # FIXME: This should be whitelisted?
-        # Fixme: However, if we add whitelist,
-        #        consider that algos could be swapped
-        #        and HMAC'ed with the public key (WOW!)
         'algorithms': 'RS256',
         'options': {
-            # FIXME: Remove when mock server returns valid access_tokens
             'verify_at_hash': False,
             # Used for leeway on the "exp" claim
             'leeway': leeway
         },
-        'issuer': config['oidc']['oktaUrl'],
+        'issuer': config['oidc']['issuer'],
         'audience': config['oidc']['clientId']
         }
     if 'access_token' in return_value:
@@ -201,11 +172,7 @@ def auth_callback():
             id_token,
             jwks_with_public_key,
             **jwt_kwargs)
-    # FIXME: Do what Karl does: https://git.io/v1D8S
-    # 401/403 per spec
-    # Only when bearer token is used: https://tools.ietf.org/html/rfc6750
-    # NOTE: For production systems,
-    #       these errors should be opaque and logged rather than returned.
+
     except (jose.exceptions.JWTClaimsError,
             jose.exceptions.JWTError,
             jose.exceptions.JWSError,
