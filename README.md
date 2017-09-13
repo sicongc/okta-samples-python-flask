@@ -82,7 +82,7 @@ If you'd like to test this sample against your own Okta org, navigate to the Okt
 1. Create a new **Web** application by selecting **Create New Application** from the *Applications* page.		
 2. After accepting the default configuration, select **Create Application** to redirect back to the *General Settings* of your application.		
 3. Copy the **Client ID** and **Client Secret**, as it will be needed for the client configuration.
-4. Finally, navigate to `https://{yourOktaDomain}.com/oauth2/default` to see if the [Default Authorization Server](https://developer.okta.com/docs/api/resources/oauth2.html#using-the-default-authorization-server) is setup. If not, [let us know](mailto:developers@okta.com).
+4. Finally, navigate to `https://{yourOktaDomain}.com/oauth2/default/.well-known/openid-configuration` to see if the [Default Authorization Server](https://developer.okta.com/docs/api/resources/oauth2.html#using-the-default-authorization-server) is setup. If not, [let us know](mailto:developers@okta.com).
 
 Then, replace the *oidc* settings in `.samples.config.json` to point to your new app:
 ```javascript
